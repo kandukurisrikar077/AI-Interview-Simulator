@@ -1,0 +1,16 @@
+{
+  "short_name": "IntervueAI",
+  "name": "IntervueAI — Placement Mock Simulator",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "/dashboard",
+  "background_color": "#050816",
+  "theme_color": "#7c3aed",
+  "display": "standalone",
+  "orientation": "portrait"
+}

@@ -1,0 +1,16 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+pydantic
+pydantic-settings
+python-jose[cryptography]
+passlib[bcrypt]
+python-multipart
+pypdf
+reportlab
+google-genai
+python-dotenv
+pillow
+opencv-python-headless
+email-validator
+openai
