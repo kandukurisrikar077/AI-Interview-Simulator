@@ -274,6 +274,9 @@ origins = [
     "http://127.0.0.1:5175",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+
+    # Vercel
+    "https://ai-interview-simulator-lovat.vercel.app",
 ]
 
 app.add_middleware(
