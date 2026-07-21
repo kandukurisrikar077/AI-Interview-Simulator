@@ -1,8 +1,7 @@
 from pydantic import BaseModel, EmailStr, Field, field_validator
 import json
 from datetime import datetime
-from typing import List, Optional, Any
-
+from typing import *
 # --- AUTH SCHEMAS ---
 
 class UserBase(BaseModel):

@@ -1,5 +1,5 @@
 import json
-from typing import Optional, List, Dict, Any
+from typing import Dict, List, Optional, Any
 from pydantic import BaseModel, Field
 from google.genai import types
 from app.core.config import settings

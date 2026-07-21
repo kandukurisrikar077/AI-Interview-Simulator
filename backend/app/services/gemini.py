@@ -1,7 +1,7 @@
 import json
 import os
 from pydantic import BaseModel, Field
-from typing import List, Optional, Any
+from typing import List, Dict, Optional, Any
 from google import genai
 from google.genai import types
 from openai import OpenAI

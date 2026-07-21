@@ -4,7 +4,7 @@ import json
 import zipfile
 import xml.etree.ElementTree as ET
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Optional, Any
 from pypdf import PdfReader
 from google import genai
 from google.genai import types
