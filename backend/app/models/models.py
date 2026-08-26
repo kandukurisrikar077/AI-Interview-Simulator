@@ -265,3 +265,15 @@ class Certificate(Base):
     subtitle = Column(String, nullable=True)
     verification_code = Column(String, unique=True, nullable=False)
     issued_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class EmailOTP(Base):
+    __tablename__ = "email_otps"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, index=True, nullable=False)
+    otp_hash = Column(String, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    attempts = Column(Integer, default=0, nullable=False)
+    last_sent_at = Column(DateTime, nullable=True)

@@ -340,3 +340,12 @@ class VerifyEmailRequest(BaseModel):
     code: str = Field(..., min_length=6, max_length=6)
 
 
+class SendOTPRequest(BaseModel):
+    email: str
+
+
+class VerifyOTPRequest(BaseModel):
+    email: str
+    otp: str = Field(..., min_length=6, max_length=6)
+
+

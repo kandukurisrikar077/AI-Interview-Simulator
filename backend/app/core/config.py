@@ -25,6 +25,13 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY", None)
     OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
+    # SMTP Settings
+    SMTP_HOST: Optional[str] = os.getenv("SMTP_HOST", None)
+    SMTP_PORT: int = int(os.getenv("SMTP_PORT", "587")) if os.getenv("SMTP_PORT") else 587
+    SMTP_USERNAME: Optional[str] = os.getenv("SMTP_USERNAME", None)
+    SMTP_PASSWORD: Optional[str] = os.getenv("SMTP_PASSWORD", None)
+    SMTP_FROM_EMAIL: Optional[str] = os.getenv("SMTP_FROM_EMAIL", None)
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

@@ -1,11 +1,10 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { motion } from 'framer-motion'
-import { Mail, Lock, ArrowRight, ArrowLeft, AlertCircle } from 'lucide-react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { Mail, ArrowRight, ArrowLeft, AlertCircle, ShieldCheck } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import apiClient from '../services/api'
 import { Input } from '../components/ui/Input'
-import { PasswordInput } from '../components/ui/PasswordInput'
 import { Button } from '../components/ui/Button'
 
 export const Login: React.FC = () => {
@@ -13,11 +12,22 @@ export const Login: React.FC = () => {
   const navigate = useNavigate()
 
   const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
+  const [otp, setOtp] = useState('')
+  const [step, setStep] = useState<'email' | 'otp'>('email')
   const [rememberMe, setRememberMe] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [emailError, setEmailError] = useState<string | null>(null)
+  const [cooldown, setCooldown] = useState(0)
+
+  useEffect(() => {
+    if (cooldown > 0) {
+      const timer = setInterval(() => {
+        setCooldown((prev) => prev - 1)
+      }, 1000)
+      return () => clearInterval(timer)
+    }
+  }, [cooldown])
 
   const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value
@@ -34,27 +44,53 @@ export const Login: React.FC = () => {
     }
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSendCode = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
+    setEmailError(null)
     setLoading(true)
 
-    // Basic Validation
-    if (!email || !password) {
-      setError('Please fill in all fields')
+    if (!email) {
+      setEmailError('Please enter your email address')
       setLoading(false)
       return
     }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
     if (!emailRegex.test(email)) {
-      setError('Please enter a valid email address')
+      setEmailError('Please enter a valid email address')
       setLoading(false)
       return
     }
 
     try {
-      const res = await apiClient.post('/auth/login', { email, password, role: 'user' })
+      await apiClient.post('/auth/send-otp', { email })
+      setStep('otp')
+      setCooldown(60)
+    } catch (err: any) {
+      console.error(err)
+      setError(
+        err.response?.data?.detail || 
+        'Failed to send verification code. Please try again.'
+      )
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError(null)
+    setLoading(true)
+
+    if (!otp || otp.length !== 6) {
+      setError('Please enter the 6-digit verification code')
+      setLoading(false)
+      return
+    }
+
+    try {
+      const res = await apiClient.post('/auth/verify-otp', { email, otp })
       const { access_token, user } = res.data
       login(access_token, user, rememberMe)
       navigate('/dashboard')
@@ -62,7 +98,26 @@ export const Login: React.FC = () => {
       console.error(err)
       setError(
         err.response?.data?.detail || 
-        'Invalid email or password. Please try again.'
+        'Invalid verification code. Please try again.'
+      )
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleResendCode = async () => {
+    if (cooldown > 0) return
+    setError(null)
+    setLoading(true)
+    try {
+      await apiClient.post('/auth/send-otp', { email })
+      setCooldown(60)
+      setOtp('')
+    } catch (err: any) {
+      console.error(err)
+      setError(
+        err.response?.data?.detail || 
+        'Failed to resend code. Please try again.'
       )
     } finally {
       setLoading(false)
@@ -82,10 +137,24 @@ export const Login: React.FC = () => {
         className="w-full max-w-md relative z-10"
       >
         {/* Back to Landing */}
-        <Link to="/" className="inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-300 transition-colors mb-6 group">
-          <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
-          Back to Landing Page
-        </Link>
+        {step === 'email' ? (
+          <Link to="/" className="inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-300 transition-colors mb-6 group">
+            <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
+            Back to Landing Page
+          </Link>
+        ) : (
+          <button
+            onClick={() => {
+              setStep('email')
+              setError(null)
+              setOtp('')
+            }}
+            className="inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-300 transition-colors mb-6 group cursor-pointer"
+          >
+            <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
+            Change Email Address
+          </button>
+        )}
 
         <div className="text-center mb-8">
           <Link to="/" className="text-3xl font-extrabold tracking-tight text-gradient-purple">
@@ -95,7 +164,9 @@ export const Login: React.FC = () => {
         </div>
 
         <div className="glass-card p-8 rounded-2xl shadow-xl border border-white/5">
-          <h2 className="text-2xl font-bold text-white mb-6 text-center">Sign In</h2>
+          <h2 className="text-2xl font-bold text-white mb-6 text-center">
+            {step === 'email' ? 'Sign In' : 'Verify Identity'}
+          </h2>
 
           {error && (
             <motion.div
@@ -108,61 +179,104 @@ export const Login: React.FC = () => {
             </motion.div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-5">
-            <Input
-              label="Email Address"
-              type="email"
-              value={email}
-              onChange={handleEmailChange}
-              error={emailError || undefined}
-              placeholder="name@company.com"
-              icon={<Mail className="w-5 h-5 text-gray-500" />}
-              disabled={loading}
-            />
-
-            <div className="space-y-1.5">
-              <div className="flex justify-between items-center mb-1">
-                <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider">
-                  Password
-                </label>
-                <Link to="/forgot-password" className="text-xs text-purple-400 hover:text-purple-300 transition-colors">
-                  Forgot Password?
-                </Link>
-              </div>
-              <PasswordInput
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                icon={<Lock className="w-5 h-5 text-gray-500" />}
-                disabled={loading}
-                aria-label="Password"
-              />
-            </div>
-
-            <div className="flex items-center justify-between pb-1">
-              <label className="flex items-center gap-2 cursor-pointer group">
-                <input
-                  type="checkbox"
-                  checked={rememberMe}
-                  onChange={(e) => setRememberMe(e.target.checked)}
-                  className="w-4 h-4 rounded border-white/10 bg-white/5 text-purple-500 focus:ring-purple-500 focus:ring-offset-[#050816] focus:ring-offset-2 transition-all cursor-pointer accent-purple-500"
+          <AnimatePresence mode="wait">
+            {step === 'email' ? (
+              <motion.form
+                key="email-form"
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 10 }}
+                onSubmit={handleSendCode}
+                className="space-y-5"
+              >
+                <Input
+                  label="Email Address"
+                  type="email"
+                  value={email}
+                  onChange={handleEmailChange}
+                  error={emailError || undefined}
+                  placeholder="name@company.com"
+                  icon={<Mail className="w-5 h-5 text-gray-500" />}
+                  disabled={loading}
                 />
-                <span className="text-xs text-gray-400 group-hover:text-gray-300 transition-colors select-none">
-                  Remember me
-                </span>
-              </label>
-            </div>
 
-            <Button
-              type="submit"
-              className="w-full mt-2"
-              loading={loading}
-              icon={<ArrowRight className="w-4.5 h-4.5" />}
-              iconPosition="right"
-            >
-              Sign In
-            </Button>
-          </form>
+                <div className="flex items-center justify-between pb-1">
+                  <label className="flex items-center gap-2 cursor-pointer group">
+                    <input
+                      type="checkbox"
+                      checked={rememberMe}
+                      onChange={(e) => setRememberMe(e.target.checked)}
+                      className="w-4 h-4 rounded border-white/10 bg-white/5 text-purple-500 focus:ring-purple-500 focus:ring-offset-[#050816] focus:ring-offset-2 transition-all cursor-pointer accent-purple-500"
+                    />
+                    <span className="text-xs text-gray-400 group-hover:text-gray-300 transition-colors select-none">
+                      Remember me
+                    </span>
+                  </label>
+                </div>
+
+                <Button
+                  type="submit"
+                  className="w-full mt-2"
+                  loading={loading}
+                  icon={<ArrowRight className="w-4.5 h-4.5" />}
+                  iconPosition="right"
+                >
+                  Send Verification Code
+                </Button>
+              </motion.form>
+            ) : (
+              <motion.form
+                key="otp-form"
+                initial={{ opacity: 0, x: 10 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -10 }}
+                onSubmit={handleVerifyOtp}
+                className="space-y-5"
+              >
+                <div className="text-xs text-gray-400 text-center leading-relaxed">
+                  We've sent a 6-digit confirmation code to <br />
+                  <strong className="text-purple-300">{email}</strong>. It expires in 5 minutes.
+                </div>
+
+                <Input
+                  label="Verification Code"
+                  type="text"
+                  maxLength={6}
+                  value={otp}
+                  onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
+                  placeholder="000000"
+                  icon={<ShieldCheck className="w-5 h-5 text-gray-500" />}
+                  disabled={loading}
+                  className="text-center tracking-[0.5em] text-lg font-bold"
+                />
+
+                <Button
+                  type="submit"
+                  className="w-full mt-2"
+                  loading={loading}
+                  icon={<ArrowRight className="w-4.5 h-4.5" />}
+                  iconPosition="right"
+                >
+                  Verify & Log In
+                </Button>
+
+                <div className="text-center pt-2">
+                  <button
+                    type="button"
+                    onClick={handleResendCode}
+                    disabled={cooldown > 0 || loading}
+                    className={`text-xs font-semibold select-none transition-colors ${
+                      cooldown > 0 
+                        ? 'text-gray-500 cursor-not-allowed' 
+                        : 'text-purple-400 hover:text-purple-300 cursor-pointer'
+                    }`}
+                  >
+                    {cooldown > 0 ? `Resend Code in ${cooldown}s` : 'Resend Code'}
+                  </button>
+                </div>
+              </motion.form>
+            )}
+          </AnimatePresence>
 
           <div className="mt-6 text-center">
             <span className="text-gray-500 text-xs">Don't have an account? </span>

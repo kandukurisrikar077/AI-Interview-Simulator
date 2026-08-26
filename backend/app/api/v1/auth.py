@@ -10,8 +10,15 @@ from app.api.deps import get_current_user
 from app.models.models import User
 from app.schemas.schemas import (
     UserCreate, UserResponse, Token, UserLogin, UserUpdate, ChangePassword,
-    ForgotPasswordRequest, ResetPasswordRequest, VerifyEmailRequest
+    ForgotPasswordRequest, ResetPasswordRequest, VerifyEmailRequest,
+    SendOTPRequest, VerifyOTPRequest
 )
+from app.models.models import EmailOTP
+from app.services.email_service import send_otp_email
+import re
+import secrets
+import hashlib
+from datetime import datetime, timezone
 
 router = APIRouter()
 
@@ -278,5 +285,179 @@ def delete_my_account(
     db.delete(current_user)
     db.commit()
     return None
+
+
+def validate_email_syntax(email: str) -> bool:
+    pattern = r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$"
+    if not re.match(pattern, email):
+        return False
+    parts = email.split("@")
+    if len(parts) != 2:
+        return False
+    domain = parts[1]
+    if "." not in domain:
+        return False
+    domain_parts = domain.split(".")
+    if any(len(p) == 0 for p in domain_parts) or len(domain_parts[-1]) < 2:
+        return False
+    return True
+
+
+def get_naive_utc_now():
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+@router.post("/send-otp", status_code=status.HTTP_200_OK)
+def send_otp(payload: SendOTPRequest, db: Session = Depends(get_db)):
+    """
+    Generate and send a 6-digit verification code to the candidate's email.
+    """
+    email_clean = payload.email.strip().lower()
+    
+    if not validate_email_syntax(email_clean):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Please enter a valid email address."
+        )
+        
+    user = db.query(User).filter(User.email == email_clean).first()
+    if not user or user.role != "user":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No candidate account exists for this email."
+        )
+        
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account has been suspended. Contact support."
+        )
+        
+    utc_now = get_naive_utc_now()
+    existing_otp = db.query(EmailOTP).filter(EmailOTP.email == email_clean).order_by(EmailOTP.created_at.desc()).first()
+    if existing_otp and existing_otp.last_sent_at:
+        sent_at_naive = existing_otp.last_sent_at.replace(tzinfo=None) if existing_otp.last_sent_at.tzinfo else existing_otp.last_sent_at
+        if utc_now - sent_at_naive < timedelta(seconds=60):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Please wait before requesting another code."
+            )
+            
+    otp_code = "".join(secrets.choice("0123456789") for _ in range(6))
+    otp_hash = hashlib.sha256(otp_code.encode("utf-8")).hexdigest()
+    expires_at = utc_now + timedelta(minutes=5)
+    
+    if existing_otp:
+        existing_otp.otp_hash = otp_hash
+        existing_otp.expires_at = expires_at
+        existing_otp.created_at = utc_now
+        existing_otp.attempts = 0
+        existing_otp.last_sent_at = utc_now
+    else:
+        new_otp_record = EmailOTP(
+            email=email_clean,
+            otp_hash=otp_hash,
+            expires_at=expires_at,
+            created_at=utc_now,
+            attempts=0,
+            last_sent_at=utc_now
+        )
+        db.add(new_otp_record)
+        
+    db.commit()
+    try:
+        send_otp_email(email_clean, otp_code)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Email service is not configured"
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to send verification email"
+        )
+    
+    return {"message": "Verification code has been sent to your email address."}
+
+
+@router.post("/verify-otp", response_model=Token)
+def verify_otp(payload: VerifyOTPRequest, db: Session = Depends(get_db)):
+    """
+    Verify 6-digit OTP and issue JWT access token for candidate login.
+    """
+    email_clean = payload.email.strip().lower()
+    
+    if not validate_email_syntax(email_clean):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Please enter a valid email address."
+        )
+        
+    db_otp = db.query(EmailOTP).filter(EmailOTP.email == email_clean).first()
+    if not db_otp:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid verification code."
+        )
+        
+    if db_otp.attempts >= 5:
+        db.delete(db_otp)
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Too many failed attempts. Please request a new verification code."
+        )
+        
+    utc_now = get_naive_utc_now()
+    expires_at_naive = db_otp.expires_at.replace(tzinfo=None) if db_otp.expires_at.tzinfo else db_otp.expires_at
+    if utc_now > expires_at_naive:
+        db.delete(db_otp)
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Verification code expired."
+        )
+        
+    input_hash = hashlib.sha256(payload.otp.encode("utf-8")).hexdigest()
+    if db_otp.otp_hash != input_hash:
+        db_otp.attempts += 1
+        db.commit()
+        
+        if db_otp.attempts >= 5:
+            db.delete(db_otp)
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Too many failed attempts. Please request a new verification code."
+            )
+            
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid verification code."
+        )
+        
+    user = db.query(User).filter(User.email == email_clean).first()
+    if not user or user.role != "user":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No candidate account exists for this email."
+        )
+        
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is suspended. Contact support."
+        )
+        
+    db.delete(db_otp)
+    db.commit()
+    
+    access_token = security.create_access_token(subject=user.id)
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": user
+    }
 
 

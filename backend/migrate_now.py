@@ -165,6 +165,20 @@ if "campaign_candidates" not in existing_tables:
     """)
     print("  [CREATED] campaign_candidates table")
 
+if "email_otps" not in existing_tables:
+    cursor.execute("""
+        CREATE TABLE email_otps (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email VARCHAR NOT NULL,
+            otp_hash VARCHAR NOT NULL,
+            expires_at DATETIME NOT NULL,
+            created_at DATETIME,
+            attempts INTEGER DEFAULT 0 NOT NULL,
+            last_sent_at DATETIME
+        )
+    """)
+    print("  [CREATED] email_otps table")
+
 # ─── 4. COMMIT ───────────────────────────────────────────────────────────────
 
 conn.commit()
