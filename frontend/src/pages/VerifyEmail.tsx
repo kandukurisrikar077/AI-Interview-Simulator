@@ -1,7 +1,7 @@
-import React, { useState, useRef } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { ShieldCheck, ArrowRight, ArrowLeft, AlertCircle } from 'lucide-react'
+import { ShieldCheck, ArrowRight, ArrowLeft, AlertCircle, CheckCircle2 } from 'lucide-react'
 import { Button } from '../components/ui/Button'
 import apiClient from '../services/api'
 
@@ -11,9 +11,21 @@ export const VerifyEmail: React.FC = () => {
   const [email] = useState(searchParams.get('email') || '')
   const [code, setCode] = useState(['', '', '', '', '', ''])
   const [loading, setLoading] = useState(false)
+  const [resending, setResending] = useState(false)
+  const [cooldown, setCooldown] = useState(60)
   const [success, setSuccess] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [infoMessage, setInfoMessage] = useState<string | null>(null)
   const inputsRef = useRef<(HTMLInputElement | null)[]>([])
+
+  useEffect(() => {
+    if (cooldown > 0) {
+      const timer = setInterval(() => {
+        setCooldown((prev) => prev - 1)
+      }, 1000)
+      return () => clearInterval(timer)
+    }
+  }, [cooldown])
 
   const handleChange = (index: number, value: string) => {
     if (value.length > 1) return
@@ -36,6 +48,7 @@ export const VerifyEmail: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
+    setInfoMessage(null)
     setLoading(true)
 
     const verificationCode = code.join('')
@@ -58,6 +71,24 @@ export const VerifyEmail: React.FC = () => {
       setError(err?.response?.data?.detail || 'Verification failed. Please check the code and try again.')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleResend = async () => {
+    if (cooldown > 0 || resending || !email) return
+    setError(null)
+    setInfoMessage(null)
+    setResending(true)
+    try {
+      await apiClient.post('/auth/resend-verification', { email })
+      setInfoMessage('Verification code sent. Please check your email.')
+      setCooldown(60)
+      setCode(['', '', '', '', '', ''])
+      inputsRef.current[0]?.focus()
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || 'Failed to resend verification code. Please try again.')
+    } finally {
+      setResending(false)
     }
   }
 
@@ -93,7 +124,7 @@ export const VerifyEmail: React.FC = () => {
               </div>
               <div className="space-y-1">
                 <h3 className="text-lg font-bold text-white">Verification Complete!</h3>
-                <p className="text-gray-400 text-xs font-light">Redirecting you to dashboard...</p>
+                <p className="text-gray-400 text-xs font-light">Redirecting you to login...</p>
               </div>
             </motion.div>
           ) : (
@@ -108,8 +139,21 @@ export const VerifyEmail: React.FC = () => {
                   <span>{error}</span>
                 </motion.div>
               )}
+
+              {infoMessage && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="flex items-center gap-2 p-3 rounded-lg border border-green-500/20 bg-green-500/5 text-green-400 text-xs mb-4"
+                >
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  <span>{infoMessage}</span>
+                </motion.div>
+              )}
+
               <p className="text-xs text-gray-400 text-center leading-relaxed">
-                We have dispatched a 6-digit confirmation pin to your email. Enter the code to activate your assessment workspace.
+                We have dispatched a 6-digit confirmation pin to <br />
+                <strong className="text-purple-300">{email}</strong>. Enter the code to activate your assessment workspace.
               </p>
 
               <div className="flex justify-between gap-2">
@@ -140,8 +184,17 @@ export const VerifyEmail: React.FC = () => {
 
               <div className="text-center text-xs text-gray-500">
                 Didn't receive the pin?{' '}
-                <button type="button" className="text-purple-400 hover:text-purple-300 font-semibold cursor-pointer">
-                  Resend Email
+                <button
+                  type="button"
+                  onClick={handleResend}
+                  disabled={cooldown > 0 || resending}
+                  className={`font-semibold select-none transition-colors ${
+                    cooldown > 0 || resending
+                      ? 'text-gray-500 cursor-not-allowed'
+                      : 'text-purple-400 hover:text-purple-300 cursor-pointer'
+                  }`}
+                >
+                  {resending ? 'Sending...' : cooldown > 0 ? `Resend available in ${cooldown}s` : 'Resend Email'}
                 </button>
               </div>
 

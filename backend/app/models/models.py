@@ -277,3 +277,4 @@ class EmailOTP(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     attempts = Column(Integer, default=0, nullable=False)
     last_sent_at = Column(DateTime, nullable=True)
+    purpose = Column(String, default="login", nullable=False)

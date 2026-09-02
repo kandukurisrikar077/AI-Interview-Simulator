@@ -336,8 +336,12 @@ class ResetPasswordRequest(BaseModel):
     new_password: str = Field(..., min_length=8)
 
 class VerifyEmailRequest(BaseModel):
-    email: EmailStr
+    email: str
     code: str = Field(..., min_length=6, max_length=6)
+
+
+class ResendVerificationRequest(BaseModel):
+    email: str
 
 
 class SendOTPRequest(BaseModel):

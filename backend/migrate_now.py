@@ -174,10 +174,19 @@ if "email_otps" not in existing_tables:
             expires_at DATETIME NOT NULL,
             created_at DATETIME,
             attempts INTEGER DEFAULT 0 NOT NULL,
-            last_sent_at DATETIME
+            last_sent_at DATETIME,
+            purpose VARCHAR DEFAULT 'login' NOT NULL
         )
     """)
     print("  [CREATED] email_otps table")
+else:
+    cursor.execute("PRAGMA table_info(email_otps)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if "purpose" not in columns:
+        cursor.execute("ALTER TABLE email_otps ADD COLUMN purpose VARCHAR DEFAULT 'login' NOT NULL")
+        print("  [ADDED] email_otps.purpose column")
+    else:
+        print("  [OK] email_otps.purpose already exists")
 
 # ─── 4. COMMIT ───────────────────────────────────────────────────────────────
 

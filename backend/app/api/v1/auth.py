@@ -11,7 +11,7 @@ from app.models.models import User
 from app.schemas.schemas import (
     UserCreate, UserResponse, Token, UserLogin, UserUpdate, ChangePassword,
     ForgotPasswordRequest, ResetPasswordRequest, VerifyEmailRequest,
-    SendOTPRequest, VerifyOTPRequest
+    ResendVerificationRequest, SendOTPRequest, VerifyOTPRequest
 )
 from app.models.models import EmailOTP
 from app.services.email_service import send_otp_email
@@ -60,10 +60,49 @@ def register(user_in: UserCreate, db: Session = Depends(get_db)):
         if field in user_data and isinstance(user_data[field], list):
             user_data[field] = json.dumps(user_data[field])
             
-    new_user = User(**user_data, hashed_password=hashed_password)
+    # Set is_active = False for candidate users until email verification succeeds
+    if user_in.role == "user" or not user_in.role:
+        new_user = User(**user_data, hashed_password=hashed_password, is_active=False)
+    else:
+        new_user = User(**user_data, hashed_password=hashed_password)
     
     try:
         db.add(new_user)
+        db.flush()
+        
+        # If candidate, generate and send signup email verification OTP
+        if user_in.role == "user" or not user_in.role:
+            utc_now = get_naive_utc_now()
+            otp_code = "".join(secrets.choice("0123456789") for _ in range(6))
+            otp_hash = hashlib.sha256(otp_code.encode("utf-8")).hexdigest()
+            expires_at = utc_now + timedelta(minutes=15)
+            
+            # Remove any stale signup OTP for this email if present
+            existing_otp = db.query(EmailOTP).filter(
+                EmailOTP.email == new_user.email,
+                EmailOTP.purpose == "signup"
+            ).first()
+            if existing_otp:
+                existing_otp.otp_hash = otp_hash
+                existing_otp.expires_at = expires_at
+                existing_otp.created_at = utc_now
+                existing_otp.attempts = 0
+                existing_otp.last_sent_at = utc_now
+            else:
+                new_otp_record = EmailOTP(
+                    email=new_user.email,
+                    otp_hash=otp_hash,
+                    expires_at=expires_at,
+                    created_at=utc_now,
+                    attempts=0,
+                    last_sent_at=utc_now,
+                    purpose="signup"
+                )
+                db.add(new_otp_record)
+            
+            # Attempt to send the verification email
+            send_otp_email(new_user.email, otp_code)
+            
         db.commit()
         db.refresh(new_user)
     except IntegrityError:
@@ -78,12 +117,21 @@ def register(user_in: UserCreate, db: Session = Depends(get_db)):
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="An account with this email already exists. Please sign in instead."
             )
+    except ValueError as val_err:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Email service is not configured"
+        )
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as exc:
         db.rollback()
         print(f"[register] Unexpected error: {exc}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Could not create user account. Please try again later."
+            detail="Unable to send verification email. Please try again later."
         )
         
     return new_user
@@ -246,19 +294,153 @@ def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db))
 @router.post("/verify-email", status_code=status.HTTP_200_OK)
 def verify_email(payload: VerifyEmailRequest, db: Session = Depends(get_db)):
     """
-    Verifies user email using the 6-digit confirmation pin code.
-    For local development, any 6-digit code or code matching user status is accepted.
+    Verifies candidate signup email using the 6-digit confirmation pin code.
     """
-    user = db.query(User).filter(User.email == payload.email).first()
+    email_clean = payload.email.strip().lower()
+    
+    if not validate_email_syntax(email_clean):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Please enter a valid email address."
+        )
+        
+    user = db.query(User).filter(User.email == email_clean).first()
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Account not found."
         )
-    # Mark user active or similar if suspended
+        
+    if user.is_active:
+        return {"message": "Email address already verified."}
+        
+    db_otp = db.query(EmailOTP).filter(
+        EmailOTP.email == email_clean,
+        EmailOTP.purpose == "signup"
+    ).first()
+    
+    if not db_otp:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid verification code."
+        )
+        
+    if db_otp.attempts >= 5:
+        db.delete(db_otp)
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Too many failed attempts. Please request a new verification code."
+        )
+        
+    utc_now = get_naive_utc_now()
+    expires_at_naive = db_otp.expires_at.replace(tzinfo=None) if db_otp.expires_at.tzinfo else db_otp.expires_at
+    if utc_now > expires_at_naive:
+        db.delete(db_otp)
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Verification code expired."
+        )
+        
+    input_hash = hashlib.sha256(payload.code.strip().encode("utf-8")).hexdigest()
+    if db_otp.otp_hash != input_hash:
+        db_otp.attempts += 1
+        db.commit()
+        
+        if db_otp.attempts >= 5:
+            db.delete(db_otp)
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Too many failed attempts. Please request a new verification code."
+            )
+            
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid verification code."
+        )
+        
     user.is_active = True
+    db.delete(db_otp)
     db.commit()
     return {"message": "Email address verified successfully."}
+
+
+@router.post("/resend-verification", status_code=status.HTTP_200_OK)
+def resend_verification(payload: ResendVerificationRequest, db: Session = Depends(get_db)):
+    """
+    Resend 6-digit signup verification code.
+    """
+    email_clean = payload.email.strip().lower()
+    
+    if not validate_email_syntax(email_clean):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Please enter a valid email address."
+        )
+        
+    user = db.query(User).filter(User.email == email_clean).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No candidate account exists for this email."
+        )
+        
+    if user.is_active:
+        return {"message": "Email address already verified."}
+        
+    utc_now = get_naive_utc_now()
+    existing_otp = db.query(EmailOTP).filter(
+        EmailOTP.email == email_clean,
+        EmailOTP.purpose == "signup"
+    ).order_by(EmailOTP.created_at.desc()).first()
+    
+    if existing_otp and existing_otp.last_sent_at:
+        sent_at_naive = existing_otp.last_sent_at.replace(tzinfo=None) if existing_otp.last_sent_at.tzinfo else existing_otp.last_sent_at
+        if utc_now - sent_at_naive < timedelta(seconds=60):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Please wait before requesting another code."
+            )
+            
+    otp_code = "".join(secrets.choice("0123456789") for _ in range(6))
+    otp_hash = hashlib.sha256(otp_code.encode("utf-8")).hexdigest()
+    expires_at = utc_now + timedelta(minutes=15)
+    
+    if existing_otp:
+        existing_otp.otp_hash = otp_hash
+        existing_otp.expires_at = expires_at
+        existing_otp.created_at = utc_now
+        existing_otp.attempts = 0
+        existing_otp.last_sent_at = utc_now
+    else:
+        new_otp_record = EmailOTP(
+            email=email_clean,
+            otp_hash=otp_hash,
+            expires_at=expires_at,
+            created_at=utc_now,
+            attempts=0,
+            last_sent_at=utc_now,
+            purpose="signup"
+        )
+        db.add(new_otp_record)
+        
+    db.commit()
+    try:
+        send_otp_email(email_clean, otp_code)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Email service is not configured"
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to send verification email"
+        )
+        
+    return {"message": "Verification code sent. Please check your email."}
 
 
 @router.post("/refresh", response_model=Token)
@@ -330,11 +512,15 @@ def send_otp(payload: SendOTPRequest, db: Session = Depends(get_db)):
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Account has been suspended. Contact support."
+            detail="Account is not verified. Please verify your email before logging in."
         )
         
     utc_now = get_naive_utc_now()
-    existing_otp = db.query(EmailOTP).filter(EmailOTP.email == email_clean).order_by(EmailOTP.created_at.desc()).first()
+    existing_otp = db.query(EmailOTP).filter(
+        EmailOTP.email == email_clean,
+        EmailOTP.purpose == "login"
+    ).order_by(EmailOTP.created_at.desc()).first()
+    
     if existing_otp and existing_otp.last_sent_at:
         sent_at_naive = existing_otp.last_sent_at.replace(tzinfo=None) if existing_otp.last_sent_at.tzinfo else existing_otp.last_sent_at
         if utc_now - sent_at_naive < timedelta(seconds=60):
@@ -360,7 +546,8 @@ def send_otp(payload: SendOTPRequest, db: Session = Depends(get_db)):
             expires_at=expires_at,
             created_at=utc_now,
             attempts=0,
-            last_sent_at=utc_now
+            last_sent_at=utc_now,
+            purpose="login"
         )
         db.add(new_otp_record)
         
@@ -394,7 +581,11 @@ def verify_otp(payload: VerifyOTPRequest, db: Session = Depends(get_db)):
             detail="Please enter a valid email address."
         )
         
-    db_otp = db.query(EmailOTP).filter(EmailOTP.email == email_clean).first()
+    db_otp = db.query(EmailOTP).filter(
+        EmailOTP.email == email_clean,
+        EmailOTP.purpose == "login"
+    ).first()
+    
     if not db_otp:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -447,7 +638,7 @@ def verify_otp(payload: VerifyOTPRequest, db: Session = Depends(get_db)):
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Account is suspended. Contact support."
+            detail="Account is not verified. Please verify your email before logging in."
         )
         
     db.delete(db_otp)
