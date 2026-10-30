@@ -6,5 +6,11 @@ backend/.env
 __pycache__/
 *.py[cod]
 
-# Local database
+# Local database and backups
 *.db
+*.backup
+
+# Virtual environments
+venv/
+backend/venv/
+.venv/
