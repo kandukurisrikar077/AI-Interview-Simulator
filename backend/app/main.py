@@ -1,6 +1,9 @@
-from fastapi import FastAPI
+import time
+from datetime import datetime, timezone
+from fastapi import FastAPI, HTTPException, status, Response
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
+from sqlalchemy import text
 from app.core.database import Base, engine
 from app.models import models
 from app.api.v1.api import api_router
@@ -103,7 +106,8 @@ def migrate_db():
                 except Exception as e:
                     print(f"Migration error adding {col_name} to campaigns:", e)
 
-migrate_db()
+if settings.DATABASE_URL.startswith("sqlite"):
+    migrate_db()
 
 def seed_admin():
     from app.core import security
@@ -294,6 +298,41 @@ async def root():
         "message": "Welcome to IntervueAI API",
         "status": "healthy"
     }
+
+@app.get("/health", tags=["Monitoring"])
+async def health_check():
+    """Liveness probe: verifies web service is responsive."""
+    return {
+        "status": "healthy",
+        "service": "IntervueAI Backend",
+        "version": "1.0.0",
+        "environment": settings.ENVIRONMENT,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+@app.get("/health/db", tags=["Monitoring"])
+async def db_health_check(response: Response):
+    """Readiness probe: verifies database connectivity and measures round-trip latency."""
+    start_time = time.perf_counter()
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        latency_ms = round((time.perf_counter() - start_time) * 1000, 2)
+        db_type = "postgresql" if "postgres" in settings.DATABASE_URL else "sqlite"
+        return {
+            "status": "connected",
+            "database": db_type,
+            "latency_ms": latency_ms,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    except Exception as e:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return {
+            "status": "unhealthy",
+            "database": "disconnected",
+            "error": "Database connectivity check failed",
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

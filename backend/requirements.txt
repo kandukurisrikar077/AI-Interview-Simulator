@@ -14,3 +14,8 @@ pillow
 opencv-python-headless
 email-validator
 openai
+alembic
+psycopg2-binary
+psycopg[binary]
+pytest
+httpx
