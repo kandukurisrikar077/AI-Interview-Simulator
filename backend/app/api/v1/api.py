@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1 import auth, resumes, interviews, coding, users, admin, analytics, questions, recruiter, placement
+from app.api.v1 import auth, resumes, interviews, coding, users, admin, analytics, questions, recruiter, placement, subscription
 
 api_router = APIRouter()
 
@@ -14,3 +14,4 @@ api_router.include_router(analytics.router, prefix="/analytics", tags=["Analytic
 api_router.include_router(questions.router, prefix="/questions", tags=["Question Bank"])
 api_router.include_router(recruiter.router, prefix="/recruiter", tags=["Recruiter Campaigns"])
 api_router.include_router(placement.router, prefix="/placement", tags=["Placement Assures"])
+api_router.include_router(subscription.router, prefix="/subscription", tags=["Subscription & Pricing"])

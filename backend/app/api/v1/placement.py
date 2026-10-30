@@ -25,6 +25,8 @@ router = APIRouter()
 
 class SocialAnalyzeRequest(BaseModel):
     url: str
+    profile_text: Optional[str] = None
+    target_role: Optional[str] = None
 
 class CoverLetterRequest(BaseModel):
     company: str
@@ -93,8 +95,13 @@ def analyze_linkedin_profile_url(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Analyze LinkedIn URL profiles."""
-    analysis = placement_ai.analyze_linkedin_profile(req.url, current_user)
+    """Analyze LinkedIn profiles with optional headline and summary context."""
+    analysis = placement_ai.analyze_linkedin_profile(
+        profile_url=req.url,
+        profile_text=req.profile_text,
+        target_role=req.target_role,
+        db_user=current_user
+    )
     
     # Save log
     db_log = SocialAnalysis(
@@ -120,8 +127,12 @@ def analyze_github_profile_url(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Analyze GitHub developer profiles handles."""
-    analysis = placement_ai.analyze_github_portfolio(req.url, current_user)
+    """Analyze GitHub developer profiles with optional repository context."""
+    analysis = placement_ai.analyze_github_portfolio(
+        github_url=req.url,
+        profile_text=req.profile_text,
+        db_user=current_user
+    )
     
     # Save log
     db_log = SocialAnalysis(

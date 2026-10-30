@@ -2,6 +2,7 @@ import React from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { ToastProvider } from './context/ToastContext'
+import { ErrorBoundary } from './components/common/ErrorBoundary'
 
 // Import Pages
 import { Landing } from './pages/Landing'
@@ -151,7 +152,8 @@ function App() {
     <AuthProvider>
       <ToastProvider>
         <BrowserRouter>
-          <Routes>
+          <ErrorBoundary>
+            <Routes>
             {/* Public Views */}
             <Route path="/" element={<Landing />} />
             
@@ -566,6 +568,7 @@ function App() {
             <Route path="/offline" element={<ErrorPage code="offline" />} />
             <Route path="*" element={<ErrorPage code="404" />} />
           </Routes>
+          </ErrorBoundary>
         </BrowserRouter>
        </ToastProvider>
       </AuthProvider>

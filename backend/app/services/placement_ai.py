@@ -159,20 +159,31 @@ Applicant"""
 
 def analyze_linkedin_profile(
     profile_url: str,
+    profile_text: Optional[str] = None,
+    target_role: Optional[str] = None,
     db_user: Optional[Any] = None
 ) -> SocialMetrics:
-    """Analyze pasted LinkedIn URL structure and return optimization scores."""
+    """Analyze pasted LinkedIn profile details and return optimization scores."""
     ai_meta = get_ai_client(settings.AI_PROVIDER, db_user)
     if not ai_meta:
         return SocialMetrics(
-            score=72,
-            headline_suggestion="Needs dynamic tagline. Try: 'Software Engineer | FastAPI & React | Building scalable architectures'",
-            summary_suggestion="Summary is too short. Expand on your project highlights, core stack expertise, and business results.",
+            score=76,
+            headline_suggestion=f"Needs dynamic tagline. Try: '{target_role or 'Software Engineer'} | Building scalable cloud applications'",
+            summary_suggestion="Summary needs more quantifiable impacts. Highlight 2-3 key accomplishments and core technologies.",
             missing_sections=["Featured Projects", "Skills verification badges"],
             suggestions=["Add a clear portfolio link in bio.", "Request recommendations from peers."]
         )
 
-    prompt = f"Analyze this LinkedIn profile URL: {profile_url}. Critique standard outline sections and propose improvements."
+    role_str = target_role or getattr(db_user, 'preferred_role', 'Software Engineer')
+    prompt = f"""
+    Analyze this LinkedIn professional profile:
+    Profile URL: {profile_url}
+    Target Role: {role_str}
+    Candidate Profile Summary / Headline / Bio:
+    {profile_text or "No custom profile text provided. Perform baseline audit based on industry standards for " + str(role_str)}
+
+    Critique the headline/tagline, summary, identify missing sections, and provide actionable optimization steps.
+    """
 
     try:
         if ai_meta["type"] == "openai":
@@ -205,23 +216,31 @@ def analyze_linkedin_profile(
 
 def analyze_github_portfolio(
     github_url: str,
+    profile_text: Optional[str] = None,
     db_user: Optional[Any] = None
 ) -> GithubMetrics:
     """Audit GitHub url repositories, activity, and README layout guides."""
     ai_meta = get_ai_client(settings.AI_PROVIDER, db_user)
     if not ai_meta:
         return GithubMetrics(
-            score=78,
+            score=80,
             repos_analyzed=["portfolio-app", "algorithms-practice", "api-backend"],
-            readme_quality="Mostly clean starter profiles. Repositories need detailed deployment instructions and architecture diagrams.",
-            commit_activity_feedback="Consistent recent history. Try to space contributions to demonstrate daily integration habits.",
+            readme_quality="Repositories need detailed deployment instructions, API endpoints table, and architecture diagrams.",
+            commit_activity_feedback="Consistent history. Space contributions across weekdays to demonstrate steady engineering rhythm.",
             portfolio_suggestions=[
                 "Create a profile README presenting key technologies.",
                 "Link working live demos in repository headers."
             ]
         )
 
-    prompt = f"Audit this GitHub developer portfolio URL: {github_url}. Analyze repository presentation and project completeness."
+    prompt = f"""
+    Audit this GitHub developer portfolio:
+    GitHub URL: {github_url}
+    Candidate Key Repositories / Readme Summary:
+    {profile_text or "No repository details provided. Audit against production open-source portfolio standards."}
+
+    Critique repository presentation, README quality, commit patterns, and provide actionable portfolio recommendations.
+    """
 
     try:
         if ai_meta["type"] == "openai":

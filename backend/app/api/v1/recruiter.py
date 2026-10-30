@@ -1,10 +1,12 @@
+import secrets
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List, Optional, Any
 from pydantic import BaseModel, field_validator
 from app.core.database import get_db
-from app.api.deps import get_current_user
-from app.models.models import User, Job, Campaign, CampaignCandidate, Interview
+from app.api.deps import get_current_user, get_current_recruiter_user
+from app.models.models import User, Job, Campaign, CampaignCandidate, Interview, TeamInvitation
 
 router = APIRouter()
 
@@ -119,7 +121,7 @@ class CandidateUpdateStatus(BaseModel):
 def onboard_recruiter(
     payload: RecruiterOnboardRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_recruiter_user)
 ):
     """
     Onboard a recruiter: update profile details and create first hiring campaign/job.
@@ -197,7 +199,7 @@ def onboard_recruiter(
 def create_job_post(
     job_in: JobCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_recruiter_user)
 ):
     """Create a new job post for recruiter campaigns."""
     if current_user.role != "recruiter":
@@ -229,7 +231,7 @@ def create_job_post(
 @router.get("/jobs", response_model=List[JobResponse])
 def list_job_posts(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_recruiter_user)
 ):
     """List all job openings posted by the active recruiter."""
     if current_user.role != "recruiter":
@@ -242,7 +244,7 @@ def list_job_posts(
 def create_campaign(
     campaign_in: CampaignCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_recruiter_user)
 ):
     """Launch an assessment campaign linked to a job."""
     if current_user.role != "recruiter":
@@ -268,7 +270,7 @@ def create_campaign(
 @router.get("/campaigns", response_model=List[CampaignResponse])
 def list_campaigns(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_recruiter_user)
 ):
     """List recruiter assessment campaigns."""
     if current_user.role != "recruiter":
@@ -280,7 +282,7 @@ def list_campaigns(
 @router.get("/candidates")
 def list_campaign_candidates(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_recruiter_user)
 ):
     """Get candidate talent pipeline assessments for recruiter campaigns."""
     if current_user.role != "recruiter":
@@ -315,7 +317,7 @@ def update_candidate_status(
     candidate_id: int,
     status_update: CandidateUpdateStatus,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_recruiter_user)
 ):
     """Shortlist or reject campaign candidates."""
     if current_user.role != "recruiter":
@@ -333,7 +335,7 @@ def update_candidate_status(
 @router.get("/stats")
 def get_recruiter_dashboard_stats(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_recruiter_user)
 ):
     """Retrieve statistics for the recruiter dashboard overview card gauges."""
     if current_user.role != "recruiter":
@@ -362,6 +364,107 @@ def get_recruiter_dashboard_stats(
         "average_score": avg_score,
         "completion_rate": 94.2
     }
+
+
+# --- TEAM INVITATION SCHEMAS & ENDPOINTS ---
+
+class TeamInviteCreate(BaseModel):
+    email: str
+    role: str = "recruiter"  # recruiter or viewer
+
+
+class TeamMemberOut(BaseModel):
+    id: int
+    email: str
+    role: str
+    status: str
+    created_at: Optional[datetime] = None
+
+
+@router.get("/team", response_model=List[TeamMemberOut])
+def list_team_members(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_recruiter_user)
+):
+    """Retrieve all invited team members and colleagues for the recruiter's organization."""
+    invites = db.query(TeamInvitation).filter(
+        TeamInvitation.recruiter_id == current_user.id
+    ).order_by(TeamInvitation.created_at.desc()).all()
+    
+    results = []
+    for inv in invites:
+        display_status = inv.status.capitalize() if inv.status else "Pending"
+        results.append(TeamMemberOut(
+            id=inv.id,
+            email=inv.email,
+            role=inv.role,
+            status=display_status,
+            created_at=inv.created_at
+        ))
+    return results
+
+
+@router.post("/team/invite", response_model=TeamMemberOut, status_code=status.HTTP_201_CREATED)
+def invite_team_member(
+    invite_in: TeamInviteCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_recruiter_user)
+):
+    """Send a collaborative invitation token to a teammate or interviewer."""
+    email_clean = invite_in.email.strip().lower()
+    if not email_clean or "@" not in email_clean:
+        raise HTTPException(status_code=400, detail="Invalid email address provided.")
+
+    existing = db.query(TeamInvitation).filter(
+        TeamInvitation.recruiter_id == current_user.id,
+        TeamInvitation.email == email_clean
+    ).first()
+    if existing and existing.status == "pending":
+        raise HTTPException(status_code=400, detail="An active invitation is already pending for this email.")
+
+    token = secrets.token_urlsafe(32)
+    expires = datetime.now(timezone.utc) + timedelta(days=7)
+    
+    new_invite = TeamInvitation(
+        recruiter_id=current_user.id,
+        email=email_clean,
+        role=invite_in.role.lower(),
+        token=token,
+        status="pending",
+        created_at=datetime.now(timezone.utc),
+        expires_at=expires
+    )
+    db.add(new_invite)
+    db.commit()
+    db.refresh(new_invite)
+
+    return TeamMemberOut(
+        id=new_invite.id,
+        email=new_invite.email,
+        role=new_invite.role,
+        status="Pending",
+        created_at=new_invite.created_at
+    )
+
+
+@router.delete("/team/{invite_id}")
+def revoke_team_invitation(
+    invite_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_recruiter_user)
+):
+    """Revoke or delete an unaccepted team invitation."""
+    invite = db.query(TeamInvitation).filter(
+        TeamInvitation.id == invite_id,
+        TeamInvitation.recruiter_id == current_user.id
+    ).first()
+    if not invite:
+        raise HTTPException(status_code=404, detail="Invitation record not found.")
+
+    db.delete(invite)
+    db.commit()
+    return {"message": "Team invitation revoked successfully."}
+
 
 # Import typing helpers to prevent schema lookup bugs
 from typing import Any

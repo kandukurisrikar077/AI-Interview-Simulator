@@ -51,6 +51,8 @@ export const SocialAnalyzer: React.FC = () => {
 
   const [activeTab, setActiveTab] = useState<'linkedin' | 'github'>('linkedin')
   const [urlInput, setUrlInput] = useState('')
+  const [profileTextInput, setProfileTextInput] = useState('')
+  const [targetRoleInput, setTargetRoleInput] = useState('')
   const [loading, setLoading] = useState(false)
 
   // LinkedIn Analysis Results state
@@ -76,7 +78,11 @@ export const SocialAnalyzer: React.FC = () => {
       if (activeTab === 'linkedin') {
         // Reset old LinkedIn metrics
         setLiScore(null)
-        const res = await apiClient.post('/placement/linkedin', { url: urlInput })
+        const res = await apiClient.post('/placement/linkedin', {
+          url: urlInput,
+          profile_text: profileTextInput.trim() || undefined,
+          target_role: targetRoleInput.trim() || undefined
+        })
         const data = res.data
         setLiScore(data.score)
         setLiHeadline(data.headline_suggestion || '')
@@ -87,7 +93,10 @@ export const SocialAnalyzer: React.FC = () => {
       } else {
         // Reset old GitHub metrics
         setGhScore(null)
-        const res = await apiClient.post('/placement/github', { url: urlInput })
+        const res = await apiClient.post('/placement/github', {
+          url: urlInput,
+          profile_text: profileTextInput.trim() || undefined
+        })
         const data = res.data
         setGhScore(data.score)
         setGhRepos(data.repos_analyzed || [])
@@ -159,6 +168,32 @@ export const SocialAnalyzer: React.FC = () => {
                     placeholder={activeTab === 'linkedin' ? 'https://linkedin.com/in/username' : 'https://github.com/username'}
                     required
                   />
+
+                  {activeTab === 'linkedin' && (
+                    <Input
+                      label="Target Role (Optional)"
+                      value={targetRoleInput}
+                      onChange={e => setTargetRoleInput(e.target.value)}
+                      placeholder="e.g. Full-Stack Engineer, AI Engineer"
+                    />
+                  )}
+
+                  <div className="space-y-1.5">
+                    <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                      {activeTab === 'linkedin' ? 'Headline & About Summary (Optional)' : 'Key Repositories / Readme Summary (Optional)'}
+                    </label>
+                    <textarea
+                      value={profileTextInput}
+                      onChange={e => setProfileTextInput(e.target.value)}
+                      placeholder={
+                        activeTab === 'linkedin'
+                          ? 'Paste your profile headline and summary text here to avoid generic URL assumptions...'
+                          : 'List your top repositories, stars, and key architectures...'
+                      }
+                      rows={3}
+                      className="w-full bg-gray-950/60 border border-white/10 rounded-xl p-2.5 text-xs text-gray-200 outline-none focus:border-purple-500 font-light resize-none leading-relaxed"
+                    />
+                  </div>
                   <Button
                     type="submit"
                     className="w-full"

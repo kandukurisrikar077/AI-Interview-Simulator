@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional, Dict, Any
+from pydantic import BaseModel
 import json
 from app.services import report_generator
 
@@ -499,3 +500,136 @@ def log_malpractice(
     db.commit()
     db.refresh(new_log)
     return new_log
+
+
+# --- HR BEHAVIORAL SIMULATOR ENDPOINTS ---
+
+class HrEvaluateRequest(BaseModel):
+    question_text: str
+    user_transcript: str
+    category: Optional[str] = "Behavioral"
+    eye_contact_percent: Optional[float] = 95.0
+    posture: Optional[str] = "Focused"
+    duration_seconds: Optional[int] = 60
+
+
+class HrEvaluateResponse(BaseModel):
+    score: float
+    star_adherence: float
+    grammar_score: float
+    confidence_score: float
+    filler_words_count: int
+    feedback: str
+    strengths: List[str]
+    improvements: List[str]
+    body_language_summary: dict
+
+
+@router.get("/hr/questions")
+def get_hr_behavioral_questions():
+    """Retrieve curated HR behavioral STAR interview questions."""
+    return [
+        {
+            "id": 1,
+            "category": "Conflict Resolution",
+            "text": "Tell me about a time you had to deal with a conflict in your project team. How did you resolve it?",
+            "star_focus": "Action & Result: Focus on empathy, active listening, and constructive de-escalation."
+        },
+        {
+            "id": 2,
+            "category": "Cultural & Value Alignment",
+            "text": "Why do you want to join our organization specifically? What matches your value alignment?",
+            "star_focus": "Situation & Motivation: Demonstrate research about mission, core values, and long-term fit."
+        },
+        {
+            "id": 3,
+            "category": "Pressure & Tradeoffs",
+            "text": "Describe a situation where you worked under a tight deadline pressure. What tradeoffs did you choose?",
+            "star_focus": "Task & Action: Articulate how you prioritized MVP features and communicated risks."
+        },
+        {
+            "id": 4,
+            "category": "Overcoming Failure",
+            "text": "What is your greatest technical challenge or failure, and what did you learn from it?",
+            "star_focus": "Result & Reflection: Emphasize ownership, root cause analysis, and post-mortem growth."
+        }
+    ]
+
+
+@router.post("/hr/evaluate", response_model=HrEvaluateResponse)
+def evaluate_hr_behavioral_response(
+    req: HrEvaluateRequest,
+    current_user: User = Depends(get_current_user)
+):
+    """Evaluate candidate behavioral response using STAR methodology and communication metrics."""
+    transcript = req.user_transcript.strip()
+    if not transcript:
+        return HrEvaluateResponse(
+            score=40.0,
+            star_adherence=30.0,
+            grammar_score=50.0,
+            confidence_score=40.0,
+            filler_words_count=0,
+            feedback="No speech or transcript was detected. Try articulating your answer using the STAR method (Situation, Task, Action, Result).",
+            strengths=["Attempted session"],
+            improvements=["Provide verbal elaboration", "Structure your answer into Situation, Task, Action, and Result"],
+            body_language_summary={
+                "eye_contact": req.eye_contact_percent,
+                "posture": req.posture,
+                "status": "Needs verbal input"
+            }
+        )
+
+    # Count common filler words
+    filler_tokens = ["um", "uh", "like", "you know", "basically", "actually", "sort of", "kind of"]
+    words_lower = transcript.lower()
+    filler_count = sum(words_lower.count(token) for token in filler_tokens)
+
+    # Evaluate via AI engine
+    eval_result = gemini.evaluate_candidate_answer(
+        question_text=req.question_text,
+        user_answer=transcript,
+        expected_answer="Strong STAR narrative with clear Situation, Task, personal Action taken, and quantifiable Result.",
+        db_user=current_user
+    )
+
+    # Compute STAR adherence
+    star_keywords = ["situation", "task", "action", "result", "because", "decided", "achieved", "impact", "learned"]
+    star_hits = sum(1 for kw in star_keywords if kw in words_lower)
+    star_score = min(100.0, max(45.0, 50.0 + (star_hits * 6.0)))
+
+    # Strengths and improvements
+    strengths = []
+    improvements = []
+    if len(transcript.split()) >= 40:
+        strengths.append("Provided detailed context and elaboration")
+    else:
+        improvements.append("Answer is concise; elaborate more on specific personal actions taken")
+
+    if filler_count <= 2:
+        strengths.append("High vocabulary fluency with minimal verbal fillers")
+    else:
+        improvements.append(f"Reduced use of verbal fillers detected ({filler_count} occurrences)")
+
+    if req.eye_contact_percent and req.eye_contact_percent >= 80:
+        strengths.append(f"Strong visual engagement ({int(req.eye_contact_percent)}% camera focus)")
+
+    if not improvements:
+        improvements.append("Continue practicing varied scenario questions to reinforce spontaneous STAR articulation.")
+
+    return HrEvaluateResponse(
+        score=round(eval_result.score, 1),
+        star_adherence=round(star_score, 1),
+        grammar_score=round(eval_result.grammar_score, 1),
+        confidence_score=round(eval_result.confidence_score, 1),
+        filler_words_count=filler_count,
+        feedback=eval_result.feedback,
+        strengths=strengths,
+        improvements=improvements,
+        body_language_summary={
+            "eye_contact_percent": req.eye_contact_percent,
+            "posture": req.posture,
+            "status": "Verified"
+        }
+    )
+
