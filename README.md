@@ -1,100 +1,159 @@
-# IntervueAI Simulator
+# IntervueAI — AI Interview Simulator
 
-IntervueAI is a premium, production-quality SaaS web application designed for comprehensive AI-driven interview preparation. It features multi-modal interview rooms, custom voice recognition, Monaco-based coding rounds, automatic scoring evaluation powered by the Google Gemini API, downloadable analytical reports, and built-in browser visibility & face-tracking malpractice safeguards.
+[![FastAPI](https://img.shields.io/badge/Backend-FastAPI%200.115+-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![React](https://img.shields.io/badge/Frontend-React%2019%20%7C%20TypeScript-61DAFB?logo=react&logoColor=black)](https://react.dev)
+[![PostgreSQL](https://img.shields.io/badge/Database-PostgreSQL%2016%20%7C%20Alembic-336791?logo=postgresql&logoColor=white)](https://www.postgresql.org)
+[![Security](https://img.shields.io/badge/Security-AST%20Sandbox%20%7C%20JWT%20Hardened-green)](docs/SECURITY_IMPROVEMENTS.md)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
----
-
-## 🎨 Design & Aesthetics
-- **Futuristic Premium UI**: Built with a sleek dark theme featuring modern glassmorphism panels, rich custom Tailwind CSS v4 colors, smooth gradients, and interactive animations using Framer Motion.
-- **Micro-Animations**: Elevates UX with subtle transitions, button hover scaling, status trackers, and responsive layout elements.
-
----
-
-## 🚀 Key Features
-
-1. **User Authentication & Profile**
-   - Direct, secure password hashing using bcrypt.
-   - JWT stateless token validation middleware.
-   - Protected API route wrappers and frontend router guards.
-
-2. **Resume Upload & AI Parsing**
-   - Drag-and-drop workspace supporting PDF uploads.
-   - Pure Python text extraction layer (using `pypdf` with zero compile prerequisites).
-   - Structured JSON entity extraction using the Google Gemini API (skills, work history, projects, and education mapping).
-
-3. **Multi-Modal Interview Rooms**
-   - Configurable mock settings (Technical, HR, Mixed, or Coding categories; Easy, Medium, or Hard difficulty; 10, 20, or 30 minute durations).
-   - Camera checklist prep room validating audio and video hardware streams.
-   - Live verbal interviewing featuring custom Web Speech API adapters for speech-to-text input and text-to-speech voice questioning.
-   - Dynamic, multi-turn adaptive follow-up questioning driven by Gemini.
-
-4. **Monaco Coding Round Workspace**
-   - Resizable coding split-panels with Monaco Editor integrations.
-   - Dynamic challenge generation (from user resume credentials) and syntax validation.
-   - Real sandboxed execution workspace to compile and run Python code against dynamic test cases.
-
-5. **Interchangeable AI Service Layer (Phase 8)**
-   - Dual-provider support for Google Gemini and OpenAI APIs, switchable dynamically via `AI_PROVIDER` environment configuration.
-   - Pydantic structured output mapping constraints on both models.
-   - Real-time speech metrics analysis (grammar index, speaking pace WPM, filler word counts, character length).
-   - Customized daily 7-day and 30-day learning roadmaps.
-
-6. **Analytical Evaluations & PDF Summarizer**
-   - Multi-dimensional scoring aggregates (technical, logic, communication, pace).
-   - Custom, printable PDF generator powered by `ReportLab` incorporating speech metrics, strengths lists, and week-by-week checkpoints.
-   - Complete question timeline logs, AI feedback items, and days-based improvement roadmap.
-
-7. **Integrity & Malpractice Guard**
-   - Client-side gaze and face tracking checking if user looks away.
-   - Browser visibility monitors flagging tab switches, defocusing, and exit states.
-   - Real-time malpractice alerts synced to the backend log schema.
+**IntervueAI** is an enterprise-grade AI-powered interview simulation platform designed for candidates and recruiters. It features multi-modal interview rooms, conversational voice recognition, sandboxed Monaco coding environments, HR behavioral evaluation via the STAR methodology, dynamic candidate assessment roadmaps, automated ReportLab PDF reports, and AI-assisted recruitment pipelines.
 
 ---
 
-## 🛠️ Technical Stack
+## 🚀 Key Architectural Highlights
 
-### Frontend
-- **React 19** & **TypeScript**
-- **Vite** (Build system)
-- **Tailwind CSS v4** & **Framer Motion**
-- **Lucide Icons**
-- **Monaco Editor** (`@monaco-editor/react`)
-- **Axios** (API connection layer)
+1. **Enterprise Security Hardening**
+   - **Sandboxed Code Execution:** Multi-layer Python execution environment utilizing AST static syntax tree analysis to block malicious modules (`os`, `sys`, `subprocess`, file I/O, dunder traversal), combined with isolated subprocess execution (clean environment with zero server secrets, non-root runner, 3.0s strict timeouts, and memory/output limits).
+   - **Hardened JWT Authentication:** Pydantic validators enforcing cryptographically strong keys (>= 32 chars) in production with fast-fail safety, 60-minute token rotation, and explicit HS256 algorithm enforcement.
+   - **Role-Based Access Control (RBAC):** Backend dependency guards (`get_current_recruiter_user`) enforcing authorization across all recruiter campaigns, jobs, candidates, and team endpoints.
 
-### Backend
-- **FastAPI** (Python async framework)
-- **SQLAlchemy ORM** & **SQLite** (development-ready)
-- **Google GenAI SDK** (Gemini 2.5)
-- **ReportLab** (PDF document processing)
-- **pypdf** (Python PDF text parsing)
-- **bcrypt** (Secure user password hashes)
+2. **Relational Database & Versioning**
+   - **PostgreSQL 16 Engine:** Migrated from file-based SQLite to PostgreSQL with connection pooling (`pool_size=10`, `max_overflow=20`, `pool_pre_ping=True`, `pool_recycle=3600`).
+   - **Alembic Migrations:** Automated schema versioning (`alembic upgrade head`) and rollback tracking.
+   - **Zero Data Loss Migration:** Automated data transfer script preserving all user accounts, resumes, jobs, and questions with PostgreSQL sequence resynchronization.
 
----
+3. **Complete Feature Integrations**
+   - **Tiered Subscription System:** Real-time plan management (Free, Pro, Enterprise) backed by database models and `/api/v1/subscription` endpoints.
+   - **HR Behavioral Simulator:** STAR-method behavioral question engine with browser Web Speech API voice capture, filler-word counters, posture/eye-contact tracking, and real-time AI scoring.
+   - **Collaborative Team Invitations:** Recruiter organization management with secure 32-character invitation tokens, role selection (Recruiter vs. Viewer), and one-click revocation.
+   - **Grounded Social Profile Optimizer:** LinkedIn and GitHub profile audit grounded with user-provided headlines and repository summaries to eliminate LLM URL hallucination.
+   - **Global Error Boundary Protection:** Top-level React error boundary preventing white-screen crashes and providing seamless recovery navigation.
 
-## 📚 Project Documentation
-
-Explore the following guides for detailed information:
-
-1. 🚀 **[Installation & Setup Guide](docs/INSTALL.md)**: Steps to configure backend venv, install packages, populate DB, and launch the Vite dev server.
-2. 🔌 **[API Documentation](docs/API.md)**: JSON validation endpoints, request/response models, and headers.
-3. 📐 **[System Architecture](docs/ARCHITECTURE.md)**: Visual database ERDs, folder diagrams, design decisions, and data flow layers.
-4. 🐳 **[Production Deployment](docs/DEPLOYMENT.md)**: Production Docker configs, PostgreSQL conversions, and nginx settings.
+4. **Production Deployment Ready**
+   - **Vercel Frontend:** Optimized React 19 SPA with single-page client rewrites via `vercel.json`.
+   - **Render Backend & PostgreSQL:** Infrastructure as Code via `render.yaml` with automated database migrations and health check probes (`/health`, `/health/db`).
+   - **Docker Compose:** Multi-container production stack orchestrating PostgreSQL 16, FastAPI backend, and Vite/Nginx frontend with container health checks.
 
 ---
 
-## 🐳 Quick Docker Production Deployment
+## 🛠️ Technology Stack
 
-To launch the entire platform in production containerized environment:
+| Layer | Technologies |
+| :--- | :--- |
+| **Frontend** | React 19, TypeScript, Vite, Tailwind CSS v4, Framer Motion, Monaco Editor, Lucide Icons, Axios |
+| **Backend** | Python 3.11+, FastAPI, Uvicorn, SQLAlchemy 2.0, Pydantic v2, python-jose, bcrypt |
+| **Database** | PostgreSQL 16, Alembic 1.15+, psycopg (v3) / psycopg2 |
+| **AI Layer** | Google GenAI SDK (Gemini 2.5 Flash), OpenAI API (Fallback) |
+| **Document Processing** | ReportLab (PDF generation), pypdf (Resume parsing) |
+| **DevSecOps** | Docker, Docker Compose, AST Security Sandbox, Vercel, Render |
 
+---
+
+## ⚡ Quick Start (Local Development)
+
+### 1. Prerequisites
+- **Node.js**: v18+ & npm
+- **Python**: 3.11+
+- **PostgreSQL**: 15+ running locally (or SQLite fallback)
+
+### 2. Backend Setup
 ```bash
-# Build and run containers
-docker-compose up --build -d
+cd backend
 
-# Verify services status
-docker-compose ps
+# Create and activate virtual environment
+python -m venv venv
+.\venv\Scripts\Activate.ps1   # Windows PowerShell
+# source venv/bin/activate    # Linux/macOS
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Configure environment variables
+copy .env.example .env
+# Set DATABASE_URL="postgresql://postgres:password@localhost:5432/intervue_db"
+# Set SECRET_KEY="your-cryptographically-secure-secret-key-32-chars-min"
+# Set GEMINI_API_KEY="your-gemini-api-key"
+
+# Apply database migrations
+alembic upgrade head
+
+# Start backend development server
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-Services will be mapped to:
+### 3. Frontend Setup
+```bash
+cd frontend
+
+# Install node dependencies
+npm install
+
+# Start Vite dev server
+npm run dev
+```
+
+Visit `http://localhost:5173` to access the application.
+
+---
+
+## 🐳 Docker Production Stack
+
+Run the complete multi-container stack (PostgreSQL + FastAPI + Frontend):
+
+```bash
+# Start all containers
+docker compose up --build -d
+
+# Verify health status
+docker compose ps
+```
+
 - **Frontend App**: `http://localhost` (port 80)
 - **Backend API**: `http://localhost:8000`
-- **Swagger Docs**: `http://localhost:8000/docs`
+- **Swagger Documentation**: `http://localhost:8000/docs`
+- **Liveness Probe**: `http://localhost:8000/health`
+- **Database Probe**: `http://localhost:8000/health/db`
+
+---
+
+## 🧪 Automated Testing
+
+Run the full backend test suite covering security, migrations, database queries, and integrated features:
+
+```bash
+cd backend
+$env:PYTHONPATH="."
+.\venv\Scripts\pytest.exe tests/ -v
+```
+
+Expected output:
+```
+tests/test_database.py .....             [ 23%]
+tests/test_features_integration.py ....  [ 42%]
+tests/test_security.py ............      [100%]
+===================== 21 passed in 14.85s =====================
+```
+
+Verify frontend build and type-checking:
+```bash
+cd frontend
+npm run build
+```
+
+---
+
+## 📚 Technical Documentation
+
+Comprehensive architectural and audit reports are maintained in [`docs/`](docs/):
+
+- 📋 [**Implementation Baseline Report**](docs/IMPLEMENTATION_BASELINE.md): Comprehensive baseline audit and inspection.
+- 🛡️ [**Security Improvements Report**](docs/SECURITY_IMPROVEMENTS.md): Sandboxed code runner, AST security analysis, JWT hardening, and RBAC implementation.
+- 🐘 [**PostgreSQL Migration Report**](docs/POSTGRESQL_MIGRATION.md): Alembic schema versioning, connection pooling, and zero-data-loss transfer.
+- 🚀 [**Production Deployment Guide**](docs/DEPLOYMENT_GUIDE.md): Vercel, Render, Docker Compose configurations, and health monitoring probes.
+- 🧩 [**Feature Integration Report**](docs/FEATURE_INTEGRATION_REPORT.md): Subscriptions, HR Behavioral Simulator, Team Invites, Social Analyzers, and ErrorBoundary.
+- 🏆 [**Final Master Implementation Report**](docs/FINAL_IMPLEMENTATION_REPORT.md): Complete multi-phase delivery certification.
+
+---
+
+## 📄 License
+This project is licensed under the MIT License.
