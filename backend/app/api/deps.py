@@ -21,6 +21,7 @@ def get_current_user(
     """
     FastAPI dependency to secure routes. Decodes the JWT token and
     fetches the current authenticated user from the database.
+    Explicitly enforces the configured JWT signing algorithm.
     """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -46,16 +47,31 @@ def get_current_user(
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Account has been suspended. Contact support."
+            detail="Account has been suspended or is pending email verification. Contact support."
         )
     return user
+
+
+def get_current_recruiter_user(
+    current_user: User = Depends(get_current_user)
+) -> User:
+    """
+    Dependency that verifies the current user has the 'recruiter' or administrative role.
+    Raises 403 Forbidden for candidate/unauthorized users.
+    """
+    if current_user.role not in ["recruiter", "admin", "SUPER_ADMIN"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access forbidden: Recruiter or administrative privileges required."
+        )
+    return current_user
 
 
 def get_current_admin_user(
     current_user: User = Depends(get_current_user)
 ) -> User:
     """
-    Dependency that checks the current user has the 'admin' role.
+    Dependency that checks the current user has the 'admin' or 'SUPER_ADMIN' role.
     Raises 403 Forbidden if the user is not an admin.
     """
     if current_user.role not in ["admin", "SUPER_ADMIN"]:
@@ -64,4 +80,3 @@ def get_current_admin_user(
             detail="Insufficient privileges. Admin access required."
         )
     return current_user
-
