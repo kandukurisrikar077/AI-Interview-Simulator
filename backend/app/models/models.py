@@ -58,6 +58,8 @@ class User(Base):
     # Relationships
     resumes = relationship("Resume", back_populates="user", cascade="all, delete-orphan")
     interviews = relationship("Interview", back_populates="user", cascade="all, delete-orphan")
+    subscription = relationship("Subscription", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    team_invitations = relationship("TeamInvitation", back_populates="recruiter", cascade="all, delete-orphan")
 
 
 class Resume(Base):
@@ -278,3 +280,51 @@ class EmailOTP(Base):
     attempts = Column(Integer, default=0, nullable=False)
     last_sent_at = Column(DateTime, nullable=True)
     purpose = Column(String, default="login", nullable=False)
+
+
+class Plan(Base):
+    __tablename__ = "plans"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, index=True, nullable=False)  # Free, Pro, Enterprise
+    price = Column(String, nullable=False)  # "$0", "$29", "Custom"
+    description = Column(Text, nullable=True)
+    features = Column(Text, nullable=True)  # JSON-encoded array of feature strings
+    interview_limit = Column(Integer, default=1, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    # Relationships
+    subscriptions = relationship("Subscription", back_populates="plan")
+
+
+class Subscription(Base):
+    __tablename__ = "subscriptions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
+    plan_id = Column(Integer, ForeignKey("plans.id", ondelete="SET NULL"), nullable=True)
+    plan_name = Column(String, default="Free", nullable=False)
+    status = Column(String, default="active", nullable=False)  # active, cancelled, expired
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    # Relationships
+    user = relationship("User", back_populates="subscription")
+    plan = relationship("Plan", back_populates="subscriptions")
+
+
+class TeamInvitation(Base):
+    __tablename__ = "team_invitations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    recruiter_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    email = Column(String, index=True, nullable=False)
+    role = Column(String, default="recruiter", nullable=False)  # recruiter, viewer
+    token = Column(String, unique=True, index=True, nullable=False)
+    status = Column(String, default="pending", nullable=False)  # pending, accepted, expired, revoked
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    expires_at = Column(DateTime, nullable=True)
+
+    # Relationships
+    recruiter = relationship("User", back_populates="team_invitations")
+
