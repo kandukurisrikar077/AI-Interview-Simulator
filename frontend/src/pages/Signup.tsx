@@ -94,6 +94,8 @@ export const Signup: React.FC = () => {
         errorMsg = 'Backend API endpoint not found. Please verify deployment configuration.'
       } else if (err.response.status === 409 || (err.response.status === 400 && typeof detail === 'string' && detail.toLowerCase().includes('already exists'))) {
         errorMsg = typeof detail === 'string' ? detail : 'An account with this email already exists. Please sign in instead.'
+      } else if (err.response.status === 503 || (typeof detail === 'string' && (detail.toLowerCase().includes('email') || detail.toLowerCase().includes('smtp')))) {
+        errorMsg = typeof detail === 'string' ? detail : 'Verification email could not be sent. Please check email service configuration or try again later.'
       } else if (err.response.status === 422 && Array.isArray(detail)) {
         errorMsg = detail
           .map((e: any) => {

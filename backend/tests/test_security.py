@@ -107,3 +107,50 @@ class TestAuthenticationAndJWTSecurity:
         with pytest.raises(JWTError):
             # Enforcing only settings.ALGORITHM (HS256) blocks 'none' attack
             jwt.decode(token, settings.SECRET_KEY, algorithms=["HS384"])
+
+
+class TestProductionConfigurationAndOTPSecurity:
+    """Tests verifying production startup validation, SQLite refusal, and OTP security rules."""
+
+    def test_production_rejects_missing_database_url(self, monkeypatch):
+        from app.core.config import Settings
+        monkeypatch.setenv("ENVIRONMENT", "production")
+        monkeypatch.delenv("DATABASE_URL", raising=False)
+        monkeypatch.setenv("SECRET_KEY", "a" * 36)
+        with pytest.raises(ValueError) as excinfo:
+            Settings(_env_file=None)
+        assert "DATABASE_URL" in str(excinfo.value)
+
+    def test_production_rejects_sqlite_database_url(self, monkeypatch):
+        from app.core.config import Settings
+        monkeypatch.setenv("ENVIRONMENT", "production")
+        monkeypatch.setenv("DATABASE_URL", "sqlite:///./prod_test.db")
+        monkeypatch.setenv("SECRET_KEY", "a" * 36)
+        with pytest.raises(ValueError) as excinfo:
+            Settings()
+        assert "SQLite is strictly prohibited in production" in str(excinfo.value)
+
+    def test_production_rejects_short_jwt_secret(self, monkeypatch):
+        from app.core.config import Settings
+        monkeypatch.setenv("ENVIRONMENT", "production")
+        monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/db")
+        monkeypatch.setenv("SECRET_KEY", "short_secret")
+        with pytest.raises(ValueError) as excinfo:
+            Settings()
+        assert "minimum 32 characters" in str(excinfo.value)
+
+    def test_production_rejects_fallback_otp_123456(self, monkeypatch):
+        from app.core.config import settings
+        from fastapi.testclient import TestClient
+        from app.main import app
+
+        monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+        client = TestClient(app)
+        
+        # In production, entering fallback 123456 without valid DB OTP hash must be rejected
+        res = client.post("/api/v1/auth/verify-email", json={
+            "email": "test_security_nonexistent@intervue.ai",
+            "code": "123456"
+        })
+        assert res.status_code == 404
+        assert "Account not found" in res.json().get("detail", "")

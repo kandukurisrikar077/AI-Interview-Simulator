@@ -8,7 +8,7 @@ import apiClient from '../services/api'
 export const VerifyEmail: React.FC = () => {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const [email] = useState(searchParams.get('email') || '')
+  const [email, setEmail] = useState(searchParams.get('email') || '')
   const [code, setCode] = useState(['', '', '', '', '', ''])
   const [loading, setLoading] = useState(false)
   const [resending, setResending] = useState(false)
@@ -51,6 +51,12 @@ export const VerifyEmail: React.FC = () => {
     setInfoMessage(null)
     setLoading(true)
 
+    if (!email) {
+      setError('Please enter your email address.')
+      setLoading(false)
+      return
+    }
+
     const verificationCode = code.join('')
     if (verificationCode.length !== 6) {
       setError('Please enter the complete 6-digit pin.')
@@ -68,7 +74,12 @@ export const VerifyEmail: React.FC = () => {
         navigate('/login')
       }, 1500)
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'Verification failed. Please check the code and try again.')
+      if (!err.response) {
+        setError('Cannot reach backend server. Please verify your connection or backend status.')
+      } else {
+        const detail = err?.response?.data?.detail
+        setError(typeof detail === 'string' ? detail : 'Verification failed. Please check the code and try again.')
+      }
     } finally {
       setLoading(false)
     }
@@ -151,10 +162,24 @@ export const VerifyEmail: React.FC = () => {
                 </motion.div>
               )}
 
-              <p className="text-xs text-gray-400 text-center leading-relaxed">
-                We have dispatched a 6-digit confirmation pin to <br />
-                <strong className="text-purple-300">{email}</strong>. Enter the code to activate your assessment workspace.
-              </p>
+              {email ? (
+                <p className="text-xs text-gray-400 text-center leading-relaxed">
+                  We have dispatched a 6-digit confirmation pin to <br />
+                  <strong className="text-purple-300">{email}</strong>. Enter the code to activate your assessment workspace.
+                </p>
+              ) : (
+                <div className="space-y-1">
+                  <label className="text-xs text-gray-400 font-medium">Your Email Address</label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="name@company.com"
+                    required
+                    className="w-full px-3 py-2 rounded-lg border border-gray-800 bg-gray-950/60 focus:border-purple-500 focus:ring-1 focus:ring-purple-500/30 text-white text-sm outline-none transition-all"
+                  />
+                </div>
+              )}
 
               <div className="flex justify-between gap-2">
                 {code.map((num, i) => (

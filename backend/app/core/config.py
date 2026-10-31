@@ -7,9 +7,8 @@ from pydantic import model_validator
 
 logger = logging.getLogger(__name__)
 
-# Compute absolute path for SQLite file to prevent CWD dependency issues
-BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-DEFAULT_SQLITE_URL = f"sqlite:///{os.path.join(BACKEND_DIR, 'intervue.db')}"
+# Default local PostgreSQL connection URL
+DEFAULT_DEV_POSTGRES_URL = "postgresql+psycopg2://postgres:postgres@localhost:5432/intervue_db"
 
 INSECURE_DEFAULT_KEYS = {
     "supersecret_intervueai_key_change_me_in_prod_1234567890",
@@ -30,8 +29,8 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))  # 60 Minutes
     
-    # Database Settings
-    DATABASE_URL: str = os.getenv("DATABASE_URL", DEFAULT_SQLITE_URL)
+    # Database Settings - Standardized on PostgreSQL
+    DATABASE_URL: Optional[str] = os.getenv("DATABASE_URL", None)
     
     # Sandboxed Code Execution Settings
     CODE_SANDBOX_TIMEOUT_SECONDS: float = float(os.getenv("CODE_SANDBOX_TIMEOUT_SECONDS", "3.0"))
@@ -52,14 +51,37 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_security_settings(self):
-        # 1. Normalize Postgres database URL (postgres:// or postgresql:// -> postgresql+psycopg2://)
+        is_production = self.ENVIRONMENT.lower() in {"production", "prod"}
+
+        # 1. Database URL Validation & Normalization - Standardized on PostgreSQL
+        if is_production:
+            if not self.DATABASE_URL:
+                raise ValueError(
+                    "FATAL CONFIGURATION ERROR: 'DATABASE_URL' environment variable is strictly required in production mode."
+                )
+            if self.DATABASE_URL.startswith("sqlite"):
+                raise ValueError(
+                    "FATAL CONFIGURATION ERROR: SQLite is strictly prohibited in production. A valid PostgreSQL connection string is required."
+                )
+        else:
+            # In development mode, default to local PostgreSQL if not explicitly provided
+            if not self.DATABASE_URL:
+                self.DATABASE_URL = DEFAULT_DEV_POSTGRES_URL
+
+        # Normalize Postgres database URL (postgres:// or postgresql:// -> postgresql+psycopg2://)
         if self.DATABASE_URL.startswith("postgres://"):
             self.DATABASE_URL = self.DATABASE_URL.replace("postgres://", "postgresql+psycopg2://", 1)
         elif self.DATABASE_URL.startswith("postgresql://") and not self.DATABASE_URL.startswith("postgresql+"):
             self.DATABASE_URL = self.DATABASE_URL.replace("postgresql://", "postgresql+psycopg2://", 1)
 
+        # Ensure only PostgreSQL dialect is accepted in production
+        if is_production and not self.DATABASE_URL.startswith("postgresql"):
+            raise ValueError(
+                "FATAL CONFIGURATION ERROR: Only PostgreSQL is supported as the database backend in production. "
+                f"Received unsupported URL scheme: {self.DATABASE_URL.split('://')[0]}"
+            )
+
         # 2. Enforce strict JWT SECRET_KEY requirements
-        is_production = self.ENVIRONMENT.lower() in {"production", "prod"}
         is_insecure = (not self.SECRET_KEY) or (self.SECRET_KEY in INSECURE_DEFAULT_KEYS) or (len(self.SECRET_KEY) < 32)
 
         if is_production and is_insecure:

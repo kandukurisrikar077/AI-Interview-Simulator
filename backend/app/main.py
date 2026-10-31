@@ -12,103 +12,6 @@ from app.core.config import settings
 # Create database tables
 Base.metadata.create_all(bind=engine)
 
-def migrate_db():
-    from sqlalchemy import inspect, text
-    inspector = inspect(engine)
-    
-    # Migrate interviews
-    columns_iv = [col["name"] for col in inspector.get_columns("interviews")]
-    with engine.begin() as conn:
-        if "job_role" not in columns_iv:
-            try:
-                conn.execute(text("ALTER TABLE interviews ADD COLUMN job_role VARCHAR"))
-                print("Migrated: Added job_role column to interviews")
-            except Exception as e:
-                print("Migration error adding job_role:", e)
-        if "mode" not in columns_iv:
-            try:
-                conn.execute(text("ALTER TABLE interviews ADD COLUMN mode VARCHAR DEFAULT 'voice'"))
-                print("Migrated: Added mode column to interviews")
-            except Exception as e:
-                print("Migration error adding mode:", e)
-
-    # Migrate users
-    columns_usr = [col["name"] for col in inspector.get_columns("users")]
-    with engine.begin() as conn:
-        if "openai_api_key" not in columns_usr:
-            try:
-                conn.execute(text("ALTER TABLE users ADD COLUMN openai_api_key VARCHAR"))
-                print("Migrated: Added openai_api_key column to users")
-            except Exception as e:
-                print("Migration error adding openai_api_key:", e)
-        if "gemini_api_key" not in columns_usr:
-            try:
-                conn.execute(text("ALTER TABLE users ADD COLUMN gemini_api_key VARCHAR"))
-                print("Migrated: Added gemini_api_key column to users")
-            except Exception as e:
-                print("Migration error adding gemini_api_key:", e)
-        
-        # New recruiter fields
-        new_user_cols = {
-            "company_website": "VARCHAR",
-            "company_logo": "VARCHAR",
-            "job_title": "VARCHAR",
-            "department": "VARCHAR",
-            "timezone": "VARCHAR",
-            "hiring_for": "TEXT",
-            "primary_roles": "TEXT",
-            "recruiter_onboarding_completed": "BOOLEAN DEFAULT 0"
-        }
-        for col_name, col_type in new_user_cols.items():
-            if col_name not in columns_usr:
-                try:
-                    conn.execute(text(f"ALTER TABLE users ADD COLUMN {col_name} {col_type}"))
-                    print(f"Migrated: Added {col_name} column to users")
-                except Exception as e:
-                    print(f"Migration error adding {col_name} to users:", e)
-
-    # Migrate jobs
-    columns_jobs = [col["name"] for col in inspector.get_columns("jobs")]
-    with engine.begin() as conn:
-        new_job_cols = {
-            "department": "VARCHAR",
-            "workplace_type": "VARCHAR",
-            "experience": "VARCHAR",
-            "salary": "VARCHAR",
-            "required_skills": "TEXT",
-            "preferred_skills": "TEXT",
-            "openings": "INTEGER DEFAULT 1",
-            "application_deadline": "VARCHAR",
-            "status": "VARCHAR DEFAULT 'Draft'"
-        }
-        for col_name, col_type in new_job_cols.items():
-            if col_name not in columns_jobs:
-                try:
-                    conn.execute(text(f"ALTER TABLE jobs ADD COLUMN {col_name} {col_type}"))
-                    print(f"Migrated: Added {col_name} column to jobs")
-                except Exception as e:
-                    print(f"Migration error adding {col_name} to jobs:", e)
-
-    # Migrate campaigns
-    columns_camps = [col["name"] for col in inspector.get_columns("campaigns")]
-    with engine.begin() as conn:
-        new_camp_cols = {
-            "coding_round_required": "BOOLEAN DEFAULT 0",
-            "resume_screening_required": "BOOLEAN DEFAULT 1",
-            "ai_evaluation_required": "BOOLEAN DEFAULT 1",
-            "status": "VARCHAR DEFAULT 'active'"
-        }
-        for col_name, col_type in new_camp_cols.items():
-            if col_name not in columns_camps:
-                try:
-                    conn.execute(text(f"ALTER TABLE campaigns ADD COLUMN {col_name} {col_type}"))
-                    print(f"Migrated: Added {col_name} column to campaigns")
-                except Exception as e:
-                    print(f"Migration error adding {col_name} to campaigns:", e)
-
-if settings.DATABASE_URL.startswith("sqlite"):
-    migrate_db()
-
 def seed_admin():
     from app.core import security
     from app.models.models import User
@@ -319,6 +222,15 @@ async def db_health_check(response: Response):
             conn.execute(text("SELECT 1"))
         latency_ms = round((time.perf_counter() - start_time) * 1000, 2)
         db_type = "postgresql" if "postgres" in settings.DATABASE_URL else "sqlite"
+        is_production = settings.ENVIRONMENT.lower() in {"production", "prod"}
+        if is_production and db_type != "postgresql":
+            response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+            return {
+                "status": "unhealthy",
+                "database": db_type,
+                "error": "PostgreSQL is strictly required in production mode.",
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
         return {
             "status": "connected",
             "database": db_type,

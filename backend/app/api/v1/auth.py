@@ -102,7 +102,14 @@ def register(user_in: UserCreate, db: Session = Depends(get_db)):
                 db.add(new_otp_record)
             
             # Attempt to send the verification email
-            send_otp_email(new_user.email, otp_code)
+            email_dispatched = send_otp_email(new_user.email, otp_code)
+            is_production = settings.ENVIRONMENT.lower() in {"production", "prod"}
+            if not email_dispatched and is_production:
+                db.rollback()
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Unable to send verification email. Please verify SMTP email service configuration."
+                )
             
         db.commit()
         db.refresh(new_user)
@@ -345,8 +352,9 @@ def verify_email(payload: VerifyEmailRequest, db: Session = Depends(get_db)):
         )
         
     input_hash = hashlib.sha256(payload.code.strip().encode("utf-8")).hexdigest()
-    is_smtp_unconfigured = not all([settings.SMTP_HOST, settings.SMTP_PORT, settings.SMTP_USERNAME, settings.SMTP_PASSWORD, settings.SMTP_FROM_EMAIL])
-    is_fallback_code = (is_smtp_unconfigured or settings.ENVIRONMENT != "production") and payload.code.strip() == "123456"
+    is_production = settings.ENVIRONMENT.lower() in {"production", "prod"}
+    # Security Rule: Fallback code 123456 is ONLY allowed in development mode, NEVER in production
+    is_fallback_code = (not is_production) and (payload.code.strip() == "123456")
 
     if db_otp.otp_hash != input_hash and not is_fallback_code:
         db_otp.attempts += 1
@@ -431,17 +439,12 @@ def resend_verification(payload: ResendVerificationRequest, db: Session = Depend
         db.add(new_otp_record)
         
     db.commit()
-    try:
-        send_otp_email(email_clean, otp_code)
-    except ValueError:
+    email_dispatched = send_otp_email(email_clean, otp_code)
+    is_production = settings.ENVIRONMENT.lower() in {"production", "prod"}
+    if not email_dispatched and is_production:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Email service is not configured"
-        )
-    except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to send verification email"
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to send verification email. Please verify SMTP email service configuration."
         )
         
     return {"message": "Verification code sent. Please check your email."}
@@ -556,17 +559,12 @@ def send_otp(payload: SendOTPRequest, db: Session = Depends(get_db)):
         db.add(new_otp_record)
         
     db.commit()
-    try:
-        send_otp_email(email_clean, otp_code)
-    except ValueError:
+    email_dispatched = send_otp_email(email_clean, otp_code)
+    is_production = settings.ENVIRONMENT.lower() in {"production", "prod"}
+    if not email_dispatched and is_production:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Email service is not configured"
-        )
-    except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to send verification email"
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to send verification email. Please verify SMTP email service configuration."
         )
     
     return {"message": "Verification code has been sent to your email address."}
@@ -615,8 +613,9 @@ def verify_otp(payload: VerifyOTPRequest, db: Session = Depends(get_db)):
         )
         
     input_hash = hashlib.sha256(payload.otp.encode("utf-8")).hexdigest()
-    is_smtp_unconfigured = not all([settings.SMTP_HOST, settings.SMTP_PORT, settings.SMTP_USERNAME, settings.SMTP_PASSWORD, settings.SMTP_FROM_EMAIL])
-    is_fallback_code = (is_smtp_unconfigured or settings.ENVIRONMENT != "production") and payload.otp.strip() == "123456"
+    is_production = settings.ENVIRONMENT.lower() in {"production", "prod"}
+    # Security Rule: Fallback code 123456 is ONLY allowed in development mode, NEVER in production
+    is_fallback_code = (not is_production) and (payload.otp.strip() == "123456")
 
     if db_otp.otp_hash != input_hash and not is_fallback_code:
         db_otp.attempts += 1
