@@ -92,8 +92,8 @@ export const RecruiterSignup: React.FC = () => {
       })
       setSuccess(true)
       setTimeout(() => {
-        navigate(`/verify-email?email=${encodeURIComponent(email)}`)
-      }, 2000)
+        navigate('/company/login')
+      }, 1500)
     } catch (err: any) {
       console.error(err)
       const detail = err.response?.data?.detail

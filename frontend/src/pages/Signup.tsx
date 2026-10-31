@@ -86,9 +86,15 @@ export const Signup: React.FC = () => {
     } catch (err: any) {
       console.error(err)
       const detail = err.response?.data?.detail
-      let errorMsg = 'Registration failed. This email might already be registered.'
-      
-      if (err.response?.status === 422 && Array.isArray(detail)) {
+      let errorMsg = 'Registration failed. Please try again.'
+
+      if (!err.response) {
+        errorMsg = 'Cannot reach backend server. Please verify your connection or backend URL.'
+      } else if (err.response.status === 404) {
+        errorMsg = 'Backend API endpoint not found. Please verify deployment configuration.'
+      } else if (err.response.status === 409 || (err.response.status === 400 && typeof detail === 'string' && detail.toLowerCase().includes('already exists'))) {
+        errorMsg = typeof detail === 'string' ? detail : 'An account with this email already exists. Please sign in instead.'
+      } else if (err.response.status === 422 && Array.isArray(detail)) {
         errorMsg = detail
           .map((e: any) => {
             const field = e.loc ? e.loc[e.loc.length - 1] : ''
