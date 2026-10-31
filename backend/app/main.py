@@ -162,6 +162,70 @@ def seed_questions():
 
 seed_questions()
 
+def seed_plans():
+    import json
+    from app.models.models import Plan
+    from app.core.database import SessionLocal
+    db = SessionLocal()
+    try:
+        count = db.query(Plan).count()
+        if count == 0:
+            default_plans = [
+                {
+                    "name": "Free",
+                    "price": "$0",
+                    "description": "Explore the basics of the interview room.",
+                    "features": json.dumps([
+                        "1 Technical session / month",
+                        "Text questions, no voice input",
+                        "Basic resume parse checklist"
+                    ]),
+                    "interview_limit": 1
+                },
+                {
+                    "name": "Pro",
+                    "price": "$29",
+                    "description": "Accelerate training with complete voice rounds.",
+                    "features": json.dumps([
+                        "Unlimited mock interview rooms",
+                        "Gemini conversational voice synthesis",
+                        "Integrated Monaco coding editor (Python, Java, JS, C++)",
+                        "ReportLab PDF result logs",
+                        "Gaze & tab malpractice tracking"
+                    ]),
+                    "interview_limit": 9999
+                },
+                {
+                    "name": "Enterprise",
+                    "price": "Custom",
+                    "description": "For bootcamp metrics tracking.",
+                    "features": json.dumps([
+                        "Custom template parameters",
+                        "Dedicated admin portal analytics",
+                        "Feature flags management options",
+                        "SSO security guards settings"
+                    ]),
+                    "interview_limit": 99999
+                }
+            ]
+            for p_data in default_plans:
+                p = Plan(
+                    name=p_data["name"],
+                    price=p_data["price"],
+                    description=p_data["description"],
+                    features=p_data["features"],
+                    interview_limit=p_data["interview_limit"]
+                )
+                db.add(p)
+            db.commit()
+            print("Plans seeded successfully!")
+    except Exception as e:
+        print("Error seeding plans:", e)
+    finally:
+        db.close()
+
+seed_plans()
+
 app = FastAPI(
     title="IntervueAI API",
     description="Backend services for IntervueAI - AI Interview Simulator",
