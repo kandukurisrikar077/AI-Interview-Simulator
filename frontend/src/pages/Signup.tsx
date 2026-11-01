@@ -152,8 +152,8 @@ export const Signup: React.FC = () => {
                 <CheckCircle2 className="w-6 h-6" />
               </div>
               <div>
-                <h3 className="text-lg font-bold text-white mb-1">Registration Successful!</h3>
-                <p className="text-gray-400 text-xs font-light">Redirecting you to the sign-in page...</p>
+                <h3 className="text-lg font-bold text-white mb-1">Account Created!</h3>
+                <p className="text-gray-400 text-xs font-light">We've dispatched a 6-digit verification code to your email. Redirecting to verify...</p>
               </div>
             </motion.div>
           ) : (

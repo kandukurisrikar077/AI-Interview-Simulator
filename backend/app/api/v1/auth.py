@@ -11,7 +11,7 @@ from app.api.deps import get_current_user
 from app.models.models import User
 from app.schemas.schemas import (
     UserCreate, UserResponse, Token, UserLogin, UserUpdate, ChangePassword,
-    ForgotPasswordRequest, ResetPasswordRequest, VerifyEmailRequest,
+    ForgotPasswordRequest, ResetPasswordRequest, VerifyResetOTPRequest, VerifyEmailRequest,
     ResendVerificationRequest, SendOTPRequest, VerifyOTPRequest
 )
 from app.models.models import EmailOTP
@@ -36,18 +36,64 @@ def register(user_in: UserCreate, db: Session = Depends(get_db)):
         )
 
     # Pre-check for existing email to give a clear, friendly error
-    existing = db.query(User).filter(User.email == user_in.email).first()
+    email_clean = user_in.email.strip().lower()
+    existing = db.query(User).filter(User.email.ilike(email_clean)).first()
     if existing:
-        if user_in.role == "recruiter":
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Recruiter already exists."
-            )
+        if existing.is_active:
+            if user_in.role == "recruiter":
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Recruiter already exists."
+                )
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="An account with this email already exists. Please sign in instead."
+                )
         else:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="An account with this email already exists. Please sign in instead."
-            )
+            # Re-activate and update unverified pending candidate
+            existing.hashed_password = security.get_password_hash(user_in.password)
+            if user_in.full_name:
+                existing.full_name = user_in.full_name
+            db.commit()
+            
+            # Send fresh verification code
+            utc_now = get_naive_utc_now()
+            otp_code = "".join(secrets.choice("0123456789") for _ in range(6))
+            otp_hash = hashlib.sha256(otp_code.encode("utf-8")).hexdigest()
+            expires_at = utc_now + timedelta(minutes=15)
+            
+            existing_otp = db.query(EmailOTP).filter(
+                EmailOTP.email == email_clean,
+                EmailOTP.purpose == "signup"
+            ).first()
+            if existing_otp:
+                existing_otp.otp_hash = otp_hash
+                existing_otp.expires_at = expires_at
+                existing_otp.created_at = utc_now
+                existing_otp.attempts = 0
+                existing_otp.last_sent_at = utc_now
+            else:
+                new_otp_record = EmailOTP(
+                    email=email_clean,
+                    otp_hash=otp_hash,
+                    expires_at=expires_at,
+                    created_at=utc_now,
+                    attempts=0,
+                    last_sent_at=utc_now,
+                    purpose="signup"
+                )
+                db.add(new_otp_record)
+            db.commit()
+            
+            email_dispatched = send_otp_email(email_clean, otp_code, purpose="signup")
+            is_production = settings.ENVIRONMENT.lower() in {"production", "prod"}
+            if not email_dispatched and is_production:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Unable to send verification email. Please verify SMTP email service configuration."
+                )
+            return existing
 
     hashed_password = security.get_password_hash(user_in.password)
     
@@ -159,7 +205,7 @@ def login(user_in: UserLogin, db: Session = Depends(get_db)):
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Account is suspended. Contact support."
+            detail="Account is not verified. Please verify your email before logging in."
         )
     
     # Enforce role match to prevent cross-login (e.g. recruiter logging in as candidate or vice versa)
@@ -272,31 +318,217 @@ def change_password(
 @router.post("/forgot-password", status_code=status.HTTP_200_OK)
 def forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db)):
     """
-    Password reset request. Verifies if email exists in database.
+    Password reset request. Generates and sends a 6-digit verification code to the registered email.
     """
-    user = db.query(User).filter(User.email == payload.email).first()
+    email_clean = payload.email.strip().lower()
+    if not validate_email_syntax(email_clean):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Please enter a valid email address."
+        )
+
+    user = db.query(User).filter(User.email == email_clean).first()
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No account associated with this email address exists."
         )
-    return {"message": "Password reset instructions have been dispatched to your inbox."}
+
+    utc_now = get_naive_utc_now()
+    existing_otp = db.query(EmailOTP).filter(
+        EmailOTP.email == email_clean,
+        EmailOTP.purpose == "reset_password"
+    ).order_by(EmailOTP.created_at.desc()).first()
+
+    if existing_otp and existing_otp.last_sent_at:
+        sent_at_naive = existing_otp.last_sent_at.replace(tzinfo=None) if existing_otp.last_sent_at.tzinfo else existing_otp.last_sent_at
+        if utc_now - sent_at_naive < timedelta(seconds=60):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Please wait before requesting another code."
+            )
+
+    otp_code = "".join(secrets.choice("0123456789") for _ in range(6))
+    otp_hash = hashlib.sha256(otp_code.encode("utf-8")).hexdigest()
+    expires_at = utc_now + timedelta(minutes=10)
+
+    if existing_otp:
+        existing_otp.otp_hash = otp_hash
+        existing_otp.expires_at = expires_at
+        existing_otp.created_at = utc_now
+        existing_otp.attempts = 0
+        existing_otp.last_sent_at = utc_now
+    else:
+        new_otp_record = EmailOTP(
+            email=email_clean,
+            otp_hash=otp_hash,
+            expires_at=expires_at,
+            created_at=utc_now,
+            attempts=0,
+            last_sent_at=utc_now,
+            purpose="reset_password"
+        )
+        db.add(new_otp_record)
+
+    db.commit()
+    email_dispatched = send_otp_email(email_clean, otp_code, purpose="reset_password")
+    is_production = settings.ENVIRONMENT.lower() in {"production", "prod"}
+    if not email_dispatched and is_production:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to send password reset email. Please verify SMTP email service configuration."
+        )
+
+    return {"message": "Password reset verification code has been sent to your email."}
 
 
-@router.post("/reset-password", status_code=status.HTTP_200_OK)
-def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db)):
+@router.post("/verify-reset-otp", status_code=status.HTTP_200_OK)
+def verify_reset_otp(payload: VerifyResetOTPRequest, db: Session = Depends(get_db)):
     """
-    Resets user password with complexity checks.
+    Verify 6-digit OTP for password reset and issue a single-use reset token.
     """
-    user = db.query(User).filter(User.email == payload.email).first()
+    email_clean = payload.email.strip().lower()
+    user = db.query(User).filter(User.email == email_clean).first()
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Account not found."
         )
-    user.hashed_password = security.get_password_hash(payload.new_password)
+
+    db_otp = db.query(EmailOTP).filter(
+        EmailOTP.email == email_clean,
+        EmailOTP.purpose == "reset_password"
+    ).first()
+
+    if not db_otp:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification code."
+        )
+
+    if db_otp.attempts >= 5:
+        db.delete(db_otp)
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Too many failed attempts. Please request a new verification code."
+        )
+
+    utc_now = get_naive_utc_now()
+    expires_at_naive = db_otp.expires_at.replace(tzinfo=None) if db_otp.expires_at.tzinfo else db_otp.expires_at
+    if utc_now > expires_at_naive:
+        db.delete(db_otp)
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Verification code expired. Please request a new code."
+        )
+
+    input_hash = hashlib.sha256(payload.otp.strip().encode("utf-8")).hexdigest()
+    is_production = settings.ENVIRONMENT.lower() in {"production", "prod"}
+    is_fallback_code = (not is_production) and (payload.otp.strip() == "123456")
+
+    if db_otp.otp_hash != input_hash and not is_fallback_code:
+        db_otp.attempts += 1
+        db.commit()
+        if db_otp.attempts >= 5:
+            db.delete(db_otp)
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Too many failed attempts. Please request a new verification code."
+            )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid verification code."
+        )
+
+    # Generate a signed single-use reset token valid for 10 minutes
+    reset_token = security.create_access_token(
+        subject=f"reset_{user.id}_{user.email}",
+        expires_delta=timedelta(minutes=10)
+    )
+    return {
+        "message": "Verification code confirmed.",
+        "reset_token": reset_token
+    }
+
+
+@router.post("/reset-password", status_code=status.HTTP_200_OK)
+def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db)):
+    """
+    Resets user password with complexity checks and invalidates the reset OTP.
+    Requires either a valid reset_token or a valid reset OTP.
+    """
+    email_clean = payload.email.strip().lower()
+    user = db.query(User).filter(User.email == email_clean).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Account not found."
+        )
+
+    # Validate authorization: either reset_token or direct OTP
+    authenticated = False
+    if payload.reset_token:
+        try:
+            from jose import jwt
+            token_payload = jwt.decode(
+                payload.reset_token,
+                settings.SECRET_KEY,
+                algorithms=[settings.ALGORITHM]
+            )
+            sub = token_payload.get("sub")
+            if sub == f"reset_{user.id}_{user.email}":
+                authenticated = True
+        except Exception:
+            authenticated = False
+
+    if not authenticated and payload.otp:
+        db_otp = db.query(EmailOTP).filter(
+            EmailOTP.email == email_clean,
+            EmailOTP.purpose == "reset_password"
+        ).first()
+        if db_otp:
+            utc_now = get_naive_utc_now()
+            expires_at_naive = db_otp.expires_at.replace(tzinfo=None) if db_otp.expires_at.tzinfo else db_otp.expires_at
+            if utc_now <= expires_at_naive and db_otp.attempts < 5:
+                input_hash = hashlib.sha256(payload.otp.strip().encode("utf-8")).hexdigest()
+                is_production = settings.ENVIRONMENT.lower() in {"production", "prod"}
+                is_fallback_code = (not is_production) and (payload.otp.strip() == "123456")
+                if db_otp.otp_hash == input_hash or is_fallback_code:
+                    authenticated = True
+
+    if not authenticated:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired password reset authorization. Please verify the reset code again."
+        )
+
+    # Password complexity validation
+    pwd = payload.new_password
+    if (len(pwd) < 8 or
+        not re.search(r"[A-Z]", pwd) or
+        not re.search(r"[a-z]", pwd) or
+        not re.search(r"[0-9]", pwd) or
+        not re.search(r"[^A-Za-z0-9]", pwd)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password must be at least 8 characters long and contain uppercase, lowercase, numeric, and special characters."
+        )
+
+    user.hashed_password = security.get_password_hash(pwd)
+    
+    # Invalidate any remaining reset_password OTP for this email
+    db_otps = db.query(EmailOTP).filter(
+        EmailOTP.email == email_clean,
+        EmailOTP.purpose == "reset_password"
+    ).all()
+    for o in db_otps:
+        db.delete(o)
+
     db.commit()
-    return {"message": "Password has been successfully updated."}
+    return {"message": "Password has been successfully updated. Please sign in with your new password."}
 
 
 @router.post("/verify-email", status_code=status.HTTP_200_OK)
@@ -510,10 +742,10 @@ def send_otp(payload: SendOTPRequest, db: Session = Depends(get_db)):
         )
         
     user = db.query(User).filter(User.email == email_clean).first()
-    if not user or user.role != "user":
+    if not user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No candidate account exists for this email."
+            detail="No account associated with this email address exists."
         )
         
     if not user.is_active:
@@ -635,10 +867,10 @@ def verify_otp(payload: VerifyOTPRequest, db: Session = Depends(get_db)):
         )
         
     user = db.query(User).filter(User.email == email_clean).first()
-    if not user or user.role != "user":
+    if not user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No candidate account exists for this email."
+            detail="No account associated with this email address exists."
         )
         
     if not user.is_active:

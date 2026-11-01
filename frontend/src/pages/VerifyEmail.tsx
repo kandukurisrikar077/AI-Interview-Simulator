@@ -27,14 +27,41 @@ export const VerifyEmail: React.FC = () => {
     }
   }, [cooldown])
 
-  const handleChange = (index: number, value: string) => {
-    if (value.length > 1) return
+  const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    e.preventDefault()
+    const pastedData = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6)
+    if (!pastedData) return
+
     const newCode = [...code]
-    newCode[index] = value
+    for (let i = 0; i < pastedData.length; i++) {
+      newCode[i] = pastedData[i]
+    }
+    setCode(newCode)
+    const nextIndex = Math.min(pastedData.length, 5)
+    inputsRef.current[nextIndex]?.focus()
+  }
+
+  const handleChange = (index: number, value: string) => {
+    const cleanVal = value.replace(/\D/g, '')
+    if (cleanVal.length > 1) {
+      // Handle multi-character paste through input
+      const digits = cleanVal.slice(0, 6).split('')
+      const newCode = [...code]
+      digits.forEach((d, i) => {
+        if (index + i < 6) newCode[index + i] = d
+      })
+      setCode(newCode)
+      const nextFocus = Math.min(index + digits.length, 5)
+      inputsRef.current[nextFocus]?.focus()
+      return
+    }
+
+    const newCode = [...code]
+    newCode[index] = cleanVal
     setCode(newCode)
 
     // Focus next input
-    if (value && index < 5) {
+    if (cleanVal && index < 5) {
       inputsRef.current[index + 1]?.focus()
     }
   }
@@ -135,7 +162,7 @@ export const VerifyEmail: React.FC = () => {
               </div>
               <div className="space-y-1">
                 <h3 className="text-lg font-bold text-white">Verification Complete!</h3>
-                <p className="text-gray-400 text-xs font-light">Redirecting you to login...</p>
+                <p className="text-gray-400 text-xs font-light">Redirecting you to sign in...</p>
               </div>
             </motion.div>
           ) : (
@@ -165,7 +192,7 @@ export const VerifyEmail: React.FC = () => {
               {email ? (
                 <p className="text-xs text-gray-400 text-center leading-relaxed">
                   We have dispatched a 6-digit confirmation pin to <br />
-                  <strong className="text-purple-300">{email}</strong>. Enter the code to activate your assessment workspace.
+                  <strong className="text-purple-300">{email}</strong>. Enter the code to activate your account.
                 </p>
               ) : (
                 <div className="space-y-1">
@@ -190,6 +217,7 @@ export const VerifyEmail: React.FC = () => {
                     pattern="[0-9]*"
                     maxLength={1}
                     value={num}
+                    onPaste={i === 0 ? handlePaste : undefined}
                     onChange={(e) => handleChange(i, e.target.value)}
                     onKeyDown={(e) => handleKeyDown(i, e)}
                     className="w-12 h-12 text-center rounded-lg border border-gray-800 bg-gray-950/60 focus:border-purple-500 focus:ring-1 focus:ring-purple-500/30 text-white outline-none font-bold text-lg transition-all"
@@ -225,7 +253,7 @@ export const VerifyEmail: React.FC = () => {
 
               <div className="text-center">
                 <Link to="/login" className="text-gray-400 hover:text-white text-xs inline-flex items-center gap-1.5">
-                  <ArrowLeft className="w-3.5 h-3.5" /> Return to Login
+                  <ArrowLeft className="w-3.5 h-3.5" /> Return to Sign In
                 </Link>
               </div>
             </form>
