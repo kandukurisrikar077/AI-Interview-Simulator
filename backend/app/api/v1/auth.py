@@ -16,6 +16,7 @@ from app.schemas.schemas import (
 )
 from app.models.models import EmailOTP
 from app.services.email_service import send_otp_email
+from app.services.email_validation_service import validate_email_address
 import re
 import secrets
 import hashlib
@@ -35,8 +36,19 @@ def register(user_in: UserCreate, db: Session = Depends(get_db)):
             detail="Public registration for administrative accounts is restricted."
         )
 
-    # Pre-check for existing email to give a clear, friendly error
+    # Free Email Validation: syntax, disposable domains, domain existence & MX records
+    # Performed BEFORE database queries, password hashing, OTP generation, or email dispatch
     email_clean = user_in.email.strip().lower()
+    is_valid, validation_error, normalized_email = validate_email_address(email_clean, check_dns=True)
+    if not is_valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=validation_error
+        )
+    email_clean = normalized_email
+    user_in.email = normalized_email
+
+    # Pre-check for existing email to give a clear, friendly error
     existing = db.query(User).filter(User.email.ilike(email_clean)).first()
     if existing:
         if existing.is_active:
